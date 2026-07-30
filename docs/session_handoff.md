@@ -25,6 +25,14 @@ The next unit of work is M1, on a new branch
 [architecture.md](architecture.md) → [audit_findings.md](audit_findings.md) →
 [current_sprint.md](current_sprint.md).
 
+A separate, entirely PROPOSED document set describes where Lights is intended to
+go — a synchronized show-control system driving WLED and DMX fixtures from
+analyzed audio files. Start at
+[show_control_architecture.md](show_control_architecture.md). None of it is
+implemented, none of it changes M1's scope, and its proposed decisions are
+recorded as `PD-n` in [decisions.md](decisions.md) — which bind nothing until an
+owner accepts them.
+
 ## Purpose and boundaries
 
 This repository is the LightsApp architecture fork: incremental architecture
