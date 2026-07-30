@@ -16,6 +16,7 @@ build/
 .env
 .env.*
 !.env.example
+.local-data/
 
 # IDE / OS
 .idea/
@@ -26,3 +27,9 @@ Thumbs.db
 
 # PyInstaller (keep .spec; ignore one-off outputs)
 build_exe_output/
+
+# Local validation and generated logs
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
