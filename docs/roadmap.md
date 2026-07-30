@@ -17,13 +17,26 @@ Progress is tracked by acceptance criteria in [current_sprint.md](current_sprint
 These milestones **stabilize the application that exists**. They address the
 verified defects in [audit_findings.md](audit_findings.md).
 
-A separate, PROPOSED programme adds show-control capability that does not exist
-— audio-file analysis, semantic cues, fixture profiles as data, and synchronized
-output. Its phases are in
+A separate programme adds show-control capability that does not exist —
+live system-audio analysis, a shared normalized feature vocabulary, semantic
+cues, fixture profiles as data, and coordinated LedFx/WLED/DMX output. Its
+phases are in
 [show_control_roadmap.md](show_control_roadmap.md), and every one of them
 depends on milestones from this document. The two are complementary, not
-alternatives. Note in particular that **M10 and that document's Phase 4 are the
-same work seen from two angles** and should be executed once, not twice.
+alternatives. Note in particular that **M10 and that document's Phase 4 are one
+coordinated programme**: M10 owns fixture-profile data and migration, while
+Phase 4 applies those profiles to advanced composite fixtures and safety
+policy. Profile work should be implemented once, not duplicated.
+
+That capability roadmap now separates Phase 3 into:
+
+- **Phase 3A — Real-time party analyzer**, the primary path;
+- **Phase 3B — Optional offline track analysis** for prepared and known tracks;
+- **Phase 3C — Native renderer**, retaining LedFx as a compatibility adapter
+  during migration.
+
+Those phases preserve M2's null/recording seams, M5's in-memory pacing, M8's
+preflight, M10's explicit fixture profiles, and all blackout and safety work.
 
 ## Milestone numbering
 
@@ -114,7 +127,8 @@ rather than papered over.
 - In-memory desired DMX state, owned by a runtime component.
 - Disk removed from the high-frequency control path entirely.
 - Monotonic pacing with a configurable refresh rate (DESIGN INTENT targets
-  roughly 20 ms / 50 Hz).
+  a fixed-rate output loop; the live-renderer direction begins with a
+  nonbinding 30–44 FPS DMX budget and requires native-Windows measurement.
 - Event- or condition-based updates rather than polling.
 - Status and diagnostics surfaced from runtime state.
 
@@ -139,6 +153,8 @@ rather than papered over.
 - Explicit timeouts on every request.
 - Defined failure semantics — a LedFx outage must not degrade DMX output.
 - A clear worker or async boundary.
+- An adapter boundary that permits existing LedFx WLED scenes to remain
+  available while native rendering is added incrementally.
 - Documented support for: Windows Lights + Windows LedFx; WSL2 Lights +
   Windows LedFx; and LAN-hosted LedFx.
 
@@ -168,14 +184,19 @@ rather than papered over.
 
 ## M10 — Fixture profiles and broader rig support
 
-*Depends on M8.*
+*Depends on M8 and coordinates with the fixture-profile schema established in
+show-control Phase 1.*
 *Addresses F19.*
 
 Replace hardcoded `gigbar`, `keobin`, and `haze` behavior with profile data:
 manufacturer, model, operating mode, channel count, channel definitions,
 channel ranges, named values, UI controls, manual versus scene-based behavior,
 universe, start address, and profile version. Includes profile validation and
-migration away from the hardcoded branches in backend and frontend.
+migration away from the hardcoded branches in backend and frontend. M10 owns
+the staged positional-to-explicit addressing migration described in
+[fixture_and_transport_strategy.md](fixture_and_transport_strategy.md):
+characterize, derive implied patches, add fields without changing output,
+switch rendering with byte-identical checks, then permit address editing.
 
 ## M11 — Safe physical ILDA output
 

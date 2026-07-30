@@ -1,37 +1,44 @@
 # Session Handoff
 
 **Status of this document:** canonical. Operational state for whoever picks
-this up next. Updated during the M0 documentation baseline pass.
+this up next. Updated during the live-renderer architecture documentation pass.
 
 - **Project:** LightsApp Architecture
 - **Repository root:** `/home/griffin/projects/lightsapp-architecture-`
 - **Required Python:** 3.12.1
 - **Expected interpreter:** `.venv/bin/python`
-- **Branch at last handoff:** `docs/repository-baseline`
-- **HEAD at last handoff:** `01e6ba8` (unchanged by this pass — documentation
-  is uncommitted in the working tree)
+- **Branch at last handoff:** `docs/live-renderer-architecture`
+- **Base HEAD:** `a33ecb3`
 
 ## Where things stand
 
-Milestone M0 (documentation and repository truth) is complete pending an
-independent audit. The canonical documentation set now exists under `docs/`.
-No production code, frontend code, or dependency was touched.
+The canonical documentation set exists under `docs/`. This branch is a
+documentation-only increment clarifying live-first party operation and the
+incremental native-renderer direction. No production code, tests, frontend
+code, dependency, transport, capture implementation, renderer class, Spotify
+integration, or Mermaid diagram is in scope.
 
-The next unit of work is M1, on a new branch
-`architecture/safe-import-boundary`, scoped and specified in
-[current_sprint.md](current_sprint.md).
+After this documentation increment is reviewed, the stabilization roadmap still
+begins with M1 on `architecture/safe-import-boundary`, scoped in
+[current_sprint.md](current_sprint.md). The live renderer remains blocked on
+the safe import, hardware-free test seams, runtime-state, validation, and
+fixture-profile work recorded in the roadmaps.
 
 **Start here:** [project_overview.md](project_overview.md) →
 [architecture.md](architecture.md) → [audit_findings.md](audit_findings.md) →
 [current_sprint.md](current_sprint.md).
 
-A separate, entirely PROPOSED document set describes where Lights is intended to
-go — a synchronized show-control system driving WLED and DMX fixtures from
-analyzed audio files. Start at
-[show_control_architecture.md](show_control_architecture.md). None of it is
-implemented, none of it changes M1's scope, and its proposed decisions are
-recorded as `PD-n` in [decisions.md](decisions.md) — which bind nothing until an
-owner accepts them.
+The approved future direction is a live-first party renderer. Real-time
+system-audio capture is preferred, microphone capture is fallback, Spotify
+metadata is optional enhancement, and offline file analysis is optional for
+prepared material and testing. Both paths share normalized features, stabilized
+musical state, semantic cues, and fixture-aware rendering. LedFx remains a
+compatibility adapter while native WLED and DMX rendering develops.
+
+Start at [show_control_architecture.md](show_control_architecture.md). None of
+the new runtime components is implemented. Accepted decisions are D-13 through
+D-20 in [decisions.md](decisions.md), and unresolved schemas, algorithms,
+capture APIs, transports, and thresholds remain explicitly open.
 
 ## Purpose and boundaries
 
@@ -95,20 +102,27 @@ unpinned (F21), and ILDA output is nonphysical (F22).
 
 ## Open questions awaiting an owner
 
-Eight are recorded in [decisions.md](decisions.md). None blocks M1. The ones
-worth raising with the owner soonest:
+The original OQ series and narrower live-renderer implementation choices are
+recorded in [decisions.md](decisions.md) and
+[show_control_architecture.md](show_control_architecture.md). None blocks M1.
+The ones worth raising soonest:
 
 - **OQ-5** — which real installations must survive the M4 migration.
 - **OQ-3** — the deployment threat model, needed before M9.
 - **OQ-1** — confirm the milestone numbering range. Nonblocking; work proceeds
   under M0–M12 until told otherwise.
+- Which supported show host and capture API should be prototyped first for
+  system-audio loopback.
+- Which WLED realtime protocol and firmware/hardware matrix meet the measured
+  Phase 3C budgets.
 
 ## For the next session
 
-1. Read the four documents listed under "Where things stand".
-2. Confirm HEAD is still `01e6ba8`; if it has moved, re-verify the findings in
-   [audit_findings.md](audit_findings.md) before relying on them.
-3. If the M0 documentation audit is complete, create
-   `architecture/safe-import-boundary` and work the acceptance criteria in
-   [current_sprint.md](current_sprint.md).
-4. Do not widen the M1 branch beyond its stated scope.
+1. Read the four documents listed under "Where things stand", then the canonical
+   [live show-control architecture](show_control_architecture.md).
+2. Confirm production code still matches base HEAD `a33ecb3`; if it has moved,
+   re-verify affected findings in [audit_findings.md](audit_findings.md).
+3. Review the live-renderer documentation for current-versus-future wording and
+   unresolved implementation choices.
+4. Keep Mermaid work as a subsequent documentation/tooling increment.
+5. When moving to M1, do not widen that branch beyond its stated scope.

@@ -1,444 +1,383 @@
-# Show-Control Implementation Roadmap
+# Live Show-Control Implementation Roadmap
 
-**Status of this document:** PROPOSED. Established on branch
-`docs/lighting-audio-show-control-architecture` against HEAD `bc91b77`.
+**Status of this document:** TARGET ARCHITECTURE delivery sequence; all
+deliverables are planned work unless explicitly labeled current behavior. Updated on branch
+`docs/live-renderer-architecture`.
 
-Phases 1–5 describe how the show-control capability in
-[show_control_architecture.md](show_control_architecture.md) would be built.
-**No phase has started.** Phase numbering is a dependency order, not a priority
-order, and carries no dates, no effort estimates, and no completion percentages
-(decision D-10).
+This roadmap delivers the capability described in the canonical
+[live show-control architecture](show_control_architecture.md). No phase has
+started. Phase ordering expresses dependencies, not dates, effort, or
+completion percentages.
 
-## Relationship to the existing roadmap
+## Relationship to the stabilization roadmap
 
-This document does **not** replace [roadmap.md](roadmap.md). The two track
-different things and both apply:
+[roadmap.md](roadmap.md) remains the dependency-ordered plan for stabilizing the
+current application. This document adds live analyzer and renderer capability.
+The two plans share work and must not implement it twice:
 
-- **[roadmap.md](roadmap.md) milestones M0–M12** stabilize the application that
-  exists — safe import, tests, atomic storage, runtime state, validation,
-  security, fixture profiles. They address the verified defects in
-  [audit_findings.md](audit_findings.md).
-- **The phases here** add a capability that does not exist. Every one of them
-  depends on milestones from that list.
+- M1 and M2 make import safe and add hardware-free seams.
+- M3 makes durable artifacts safe to write and explicit to read.
+- M5 removes JSON from the live DMX path and adds pacing.
+- M7 repairs the LedFx integration boundary.
+- M8 adds validation and preflight.
+- M9 establishes operator-access policy.
+- M10 supplies fixture profiles and explicit patches.
+- M11 governs safe physical ILDA output.
 
-```text
-STABILIZATION (roadmap.md)              CAPABILITY (this document)
-──────────────────────────              ──────────────────────────
-M0  documentation ─────────────────────► (this document)
-M1  safe import ───────┐
-M2  tests + seams ─────┼───────────────► Phase 1  architecture + simulation
-M3  atomic storage ────┼──┐
-M5  runtime + pacing ──┼──┼────────────► Phase 2  baseline hardware control
-                       │  └────────────► Phase 3  audio analysis
-M7  LedFx config ──────┘
-M8  validation ────────┬───────────────► Phase 4  advanced fixtures
-M9  security ──────────┘
-M10 fixture profiles ──────────────────► (Phase 4 consumes it)
-M5  pacing (again) ────────────────────► Phase 5  synchronization + editing
-```
+The live programme preserves those foundations. It does not bypass them to
+reach audio reactivity sooner.
 
-**Milestone M10 and Phase 4 are the same work seen from two angles.** M10
-replaces hardcoded fixture knowledge with data; Phase 4 uses that data to
-support Keobin, GigBAR, lasers, and haze. They should be executed as one
-programme, not duplicated. Where this document and M10 disagree, M10 governs the
-schema and this document governs the fixture-specific requirements.
-
-**Phase numbering versus milestone numbering.** Phases are numbered
-independently and deliberately — merging them into the M-series would have
-required renumbering milestones while OQ-1 (the M0–M12 versus M0–M10 question)
-is still open. If OQ-1 resolves toward renumbering, these phases are unaffected.
+**Ownership rule:** Phase 1 defines and simulates the fixture-profile schema.
+M10 owns production fixture profiles, migration from hardcoded fixture
+knowledge, and the explicit patch data for real installations. Later
+show-control phases consume and commission those profiles; they do not create a
+second profile system.
 
 ---
 
-# Phase 1 — Architecture and simulation
+# Phase 1 — Schemas, semantic boundaries, and simulation
 
-**Hardware-free in its entirety.** Nothing in this phase touches a fixture, and
-nothing in it should require the rig.
+**Hardware-free.**
 
 ## Prerequisites
 
-| Prerequisite | Why it blocks |
-| --- | --- |
-| **M1** — safe import | `SENDER` is constructed at import (F3); no transport can be injected until that is fixed |
-| **M2** — test seams and pytest baseline | There is no test suite (F10); simulation output with nothing asserting over it is not validation |
-| **M3** — typed read outcomes | Schemas need to distinguish missing from corrupt before artifacts depend on them |
-| Decision on **PD-1** (semantic boundary) | It determines the shape of every schema in this phase |
+- M1 safe import;
+- M2 pytest baseline and injectable output seams;
+- M3 typed storage outcomes for durable schemas;
+- accepted semantic-cue and replay decisions in
+  [decisions.md](decisions.md).
 
 ## Deliverables
 
-1. **Schemas** — `AudioFeatureTimeline`, `ShowTimeline`, `Cue`,
-   `FixtureDefinition`, `FixtureInstance`. Pydantic, versioned from the first
-   commit, validated on read.
-2. **Transport interfaces** — `DmxTransport`, `WledStateTransport`,
-   `WledPixelTransport`, each with a null implementation, modelled on the
-   existing `PointSink`/`NullSink` pattern (`backend/ilda/sink.py`).
-3. **Recording DMX transport** — appends `(show_time, universe, 512-byte frame)`
-   records to a file that both tests and the future visualizer read.
-4. **Semantic cue model and capability vocabulary** — small, deliberately
-   constrained, covering only what the current rig has.
-5. **Fixture profiles for the existing rig**, derived from manuals, carrying
-   `verified: false`.
-6. **Address-collision and universe-bounds validation.**
-7. **The audio artifact format** — schema and cache-key design only. No
-   extraction yet.
-8. **Full-song simulation harness** — runs a timeline against null and recording
-   transports and produces a frame log.
-9. **Characterization frames for the current rig** — the byte-exact 512-byte
-   universe frame each stored device preset produces today, under the existing
-   `MAPPER` concatenation. These are the regression oracle for Phase 2's
-   addressing migration.
+1. Versioned conceptual schemas for normalized feature frames, musical-state
+   snapshots, semantic cues, fixture definitions, and fixture instances.
+2. A deliberately small semantic cue and capability vocabulary based on the
+   current rig.
+3. Versioned fixture-profile and patch schemas plus synthetic test fixtures.
+   Production profiles and migration belong to M10.
+4. Explicit universe and 1-based start-address fields plus collision and bounds
+   validation.
+5. Null and recording transports for DMX and both WLED output modes, following
+   the existing ILDA `PointSink`/`NullSink` precedent.
+6. A deterministic simulation pipeline that can replay authored feature,
+   state, and cue logs into recorded WLED and complete DMX universe output.
+7. Characterization frames for every current device preset before positional
+   addressing changes.
+8. Initial safety-policy types for blackout, laser master enable, strobe
+   limits, intensity ceilings, atmosphere limits, manual override, freeze or
+   hold, and loss of signal.
 
-## Validation requirements
+## Validation
 
-- All hardware-free, on both Linux and Windows CI.
-- Every schema round-trips and rejects malformed input explicitly.
-- Simulation is deterministic: the same inputs produce an identical frame log.
-- Characterization frames are captured **before** any change to `MAPPER`.
-- No test can reach a real transport — asserted, not assumed.
+- No test can reach a real output transport.
+- Every schema round-trips and rejects malformed data explicitly.
+- Identical inputs produce identical state, cue, and output logs.
+- Characterization frames are captured before `MAPPER` changes.
+- A deliberately colliding fixture patch is rejected.
+- Laser, strobe, and atmosphere policy cannot be bypassed by cue priority.
 
-## Risks
+## Completion boundary
 
-| Risk | Mitigation |
-| --- | --- |
-| Schema churn as understanding improves | Version from commit one; expect and plan for migrations |
-| Over-designing the cue model before a generator exists | Start with the capabilities the current rig actually has, and nothing else |
-| Capability vocabulary grows to accommodate one odd fixture | Prefer `macro_select` over a capability only one product understands |
-| Characterization frames captured after a change | Capture them first; treat it as the phase's first task |
-
-## Completion criteria
-
-- A show timeline can be authored by hand, simulated end to end, and its frame
-  log asserted against expectations — with no hardware present.
-- Every existing rig fixture has a profile derived from its manual.
-- Characterization frames exist for every stored device preset.
-- Address-collision validation rejects a deliberately colliding patch.
-
-## Likely user-facing improvement
-
-**Almost none, and this should be said plainly.** Phase 1 is entirely
-infrastructure. Its value is that Phases 2–5 become possible and reviewable. An
-operator would notice nothing.
+A hand-authored normalized feature log can run through state, cue, and fixture
+rendering into recording transports without hardware. This phase does not add
+live audio capture or production output.
 
 ---
 
-# Phase 2 — Baseline hardware control
+# Phase 2 — Safe fixture and transport foundation
 
-**The first phase that touches the rig.** Native-Windows validation is required
-throughout, under [platform_support.md](platform_support.md) and D-8.
+**First phase that may touch the rig. Native-Windows validation is required.**
 
 ## Prerequisites
 
-| Prerequisite | Why it blocks |
-| --- | --- |
-| **Phase 1 complete** | Nothing to drive the transports with otherwise |
-| **M5** — runtime state and pacing | F4, F5, F6: disk must leave the control path before output timing means anything |
-| **M7** — LedFx host/port decoupling | F17 makes a second network destination inexpressible |
-| **OQ-5 answered** | Which real installations must survive the addressing migration |
-| Decision on **PD-8** | Whether WLED is addressed directly, through LedFx, or both |
+- Phase 1;
+- M5 in-memory runtime state and output pacing;
+- M7 configured, injectable LedFx client;
+- M8 validation and preflight;
+- M10 production fixture profiles and explicit patch migration;
+- OQ-5 migration scope answered.
 
 ## Deliverables
 
-1. **WLED JSON state control** behind `WledStateTransport`.
-2. **WLED WebSocket** state channel, replacing polling for WLED devices.
-3. **One real DMX transport** behind the interface — the existing sACN sender,
-   refactored to be injectable rather than a module-global.
-4. **The addressing migration**, staged exactly as specified in
-   [fixture_and_transport_strategy.md](fixture_and_transport_strategy.md)
-   Part 3: derive implied addresses → add fields unused → switch the mapper →
-   only then allow editing. Steps 3 and 4 in **separate commits**.
-5. **One PAR profile** and **one light-bar profile**, verified against manuals
-   and against the physical fixtures.
-6. **Blackout and safe shutdown** on every transport — idempotent, callable at
-   any time, independent of show-engine state.
-7. **Physical output validation** against the rig.
+1. Existing sACN output behind an injectable `DmxTransport`.
+2. Output integration for the explicit patch data migrated by M10, checked
+   against Phase 1 characterization frames.
+3. Complete-universe frame rendering from explicit patches.
+4. Native-Windows commissioning of one PAR profile and one bar profile supplied
+   by M10, including manual and physical verification.
+5. Idempotent blackout and safe shutdown on every transport.
+6. A LedFx compatibility adapter with independent host and port, timeouts, and
+   defined failure behavior.
+7. Explicit per-device ownership so LedFx and native output cannot fight for
+   the same WLED device.
 
-## Validation requirements
+## Validation
 
-- **The byte-identical invariant**: after the migration, every stored device
-  preset produces the same 512-byte frame as the Phase 1 characterization
-  captured. A single mismatch blocks the phase.
-- Native Windows only for anything physical. No WSL2 result substitutes.
-- Blackout verified to actually darken the rig, from a running show and from a
-  crashed one.
-- Ctrl+C and process shutdown release the sender cleanly.
-- The relevant rows of the native-Windows checklist in
-  [platform_support.md](platform_support.md) are exercised and marked.
+- Current presets produce byte-identical DMX frames after the addressing
+  migration.
+- Real output is exercised only on native Windows.
+- Blackout is verified from normal playback and simulated failure states.
+- Sender shutdown, disconnect diagnostics, and loss-of-signal behavior are
+  observed on the real deployment path.
+- An unverified fixture profile is blocked from physical output.
 
-## Risks
+## Completion boundary
 
-| Risk | Severity | Mitigation |
-| --- | --- | --- |
-| The migration silently re-patches a working rig | **Highest in this document** | Byte-identical oracle; split commits; rig validation; OQ-5 first |
-| A `verified: false` profile reaches physical output | High | Enforce the block in code, not documentation |
-| The `sacn` monkey-patch hides transport errors | Moderate | `backend/dmx/sender.py:19-30` swallows `OSError`; revisit when the transport becomes injectable — an invisible error cannot be responded to |
-| WLED direct control conflicts with concurrent LedFx control of the same device | Moderate | PD-8 must settle ownership per device, not per capability |
-| Regressing working sACN output while refactoring it | Moderate | Characterization tests cover the sender, not just the mapper |
-
-## Completion criteria
-
-- A hand-authored timeline drives real PARs, a real light bar, and real WLED
-  devices.
-- The migration is complete with the byte-identical invariant proven.
-- Blackout works from every state, including after a simulated crash.
-- The checklist rows for this phase are marked on native Windows.
-
-## Likely user-facing improvement
-
-**The first real one.** Direct WLED control without pre-authoring every
-behaviour as a LedFx scene; fixtures addressable rather than positional; a
-blackout that works. Timing is not yet improved — that is Phase 5.
+The current rig can still run through LedFx and sACN behind safe, testable
+boundaries. This phase establishes migration infrastructure; it does not yet
+provide the new live analyzer or native WLED effects.
 
 ---
 
-# Phase 3 — Audio analysis
+# Phase 3A — Real-time party analyzer
 
-**Hardware-free.** This phase is entirely offline and is the one most amenable
-to WSL2 development.
+**Primary use-case phase. Live-first and hardware-free until output is connected
+through the earlier recording seams.**
 
 ## Prerequisites
 
-| Prerequisite | Why it blocks |
-| --- | --- |
-| **M3** — atomic writes | F7 + F8: a truncated artifact would be read back as "no beats detected" |
-| **Phase 1** artifact schema | Extraction needs a destination |
-| **FFmpeg packaging decision** | External binary; the Windows executable must locate or bundle it, and bundling is a redistribution question |
-| Decision on **PD-10** | Whether generated shows are wanted determines how much generator to build |
+- Phase 1 normalized schemas and replay logs;
+- M2 hardware-safe test environment;
+- source lifecycle ownership from M1/M5;
+- a measured capture-host prototype before an operating-system API is selected
+  permanently.
 
 ## Deliverables
 
-1. **FFmpeg decode and normalization** — subprocess-invoked, canonical mono
-   float PCM at the project sample rate, applied gain recorded, explicit failure
-   on undecodable input.
-2. **Librosa extraction** — beats, downbeats, onsets, tempo, loudness, named
-   frequency bands, spectral centroid, harmonic/percussive split, sections,
-   silence — each versioned and independently testable.
-3. **Confidence values** on every event class.
-4. **The artifact cache**, keyed by content hash + extractor version + config
-   hash, written atomically under `LIGHTSAPP_DATA_DIR`.
-5. **Manual override structure**, stored separately from generated values.
-6. **Deterministic show generation** from artifact + style + fixture groups +
-   intensity profile, producing a `ShowTimeline`.
-7. **Cue conflict resolution** — priority, manual-beats-generated, deterministic
-   tie-breaking.
-8. **An audio-file input path** in the application — the first one it has ever
-   had.
+1. Source-independent audio boundary.
+2. Preferred system-audio capture on the supported show host, with the
+   platform-specific API kept behind that boundary.
+3. Microphone fallback.
+4. Deterministic synthetic sources and recorded capture replay.
+5. Normalized feature stream with timestamp, relative loudness, bass/mid/treble
+   energy, brightness, onset strength, beat probability, estimated tempo, beat
+   phase, and confidence.
+6. Live musical-state estimates such as quiet, groove, building, peak,
+   breakdown, transition, and unknown.
+7. Smoothing, hysteresis, confidence thresholds, and transition rules.
+8. Track/source-transition handling for silence, pause, abrupt tempo or
+   spectral change, manual skip, optional metadata track change, and capture
+   loss/recovery.
+9. Gradual reset behavior for tempo history, beat phase, bar counter, rolling
+   normalization, and effect progression.
+10. Recording of audio or normalized features for deterministic replay.
 
-## Validation requirements
+## Initial performance budgets
 
-- **Determinism**: two runs over the same input produce byte-identical
-  artifacts.
-- **Cross-platform determinism measured, not assumed** — Linux and Windows
-  compared explicitly, and any floating-point divergence documented rather than
-  waved away.
-- Regeneration from the same inputs produces an identical `ShowTimeline`.
-- Manual overrides survive re-analysis.
-- Cache invalidation verified for each of the three key components
-  independently.
-- Generated shows validate against the safety rules: no haze on beat-level
-  features (PD-9), no laser cues without a modelled gate.
+- audio chunks around 10–20 ms;
+- feature updates around 50–100 Hz;
+- musical-state updates around 20–50 Hz;
+- end-to-end visible response under approximately 80 ms;
+- bounded latest-state-wins queues;
+- stale frames skipped rather than accumulated.
 
-## Risks
+These are nonbinding targets. Measure stage latency and dropped frames on the
+actual supported host.
 
-| Risk | Severity | Mitigation |
-| --- | --- | --- |
-| Downbeat and section detection unreliable for the actual music | High | Confidence-gated mappings; manual correction (deliverable 5) as a first-class path, not an afterthought |
-| FFmpeg packaging blocks the Windows build | High | Resolve before Phase 3 starts; it is a licence question as well as a technical one |
-| Analysis dependency tree bloats the packaged executable | Moderate | Measure early; consider whether analysis must ship at all, or is a development-host activity |
-| Overrides silently discarded on re-analysis | Moderate | Separate storage is a schema requirement, not a UI convenience |
-| Essentia adopted before the licence question is answered | **Blocking if it happens** | Not in this phase. Defer until the baseline proves it is needed |
+## Validation corpus
 
-## Completion criteria
+- click tracks;
+- constant tempo;
+- tempo changes;
+- silence;
+- bass-heavy material;
+- bright or treble-heavy material;
+- noisy microphone input;
+- abrupt skips;
+- quiet-to-loud changes;
+- loss and recovery of audio input.
 
-- An audio file can be supplied, analyzed, cached, and regenerated
-  deterministically.
-- A show generated from it simulates end to end (Phase 1 harness) and asserts
-  clean.
-- Manual corrections survive an extractor version bump, or the system reports
-  honestly that they cannot be re-applied.
+## Completion boundary
 
-## Likely user-facing improvement
-
-**Substantial, and the first that changes what Lights is for.** Supply a track,
-get a show that is aligned to its structure rather than to onset count. Timing
-accuracy is still limited by Phase 5's absence, but structural awareness —
-sections, buildups, restraint in quiet passages — is entirely new.
+A live system-audio source can produce stable, replayable musical-state and
+semantic-cue logs with microphone fallback. It is not complete merely because
+one capture API works on one developer machine; source failure, transition
+behavior, latency, and replay must also be measured.
 
 ---
 
-# Phase 4 — Advanced fixtures
+# Phase 3B — Optional offline track analysis
 
-**Safety-critical.** [laser_and_haze_safety.md](laser_and_haze_safety.md) is
-required reading before any work in this phase begins, and it is normative, not
-advisory.
+**Prepared-track enhancement. Not a prerequisite for ordinary party mode.**
 
 ## Prerequisites
 
-| Prerequisite | Why it blocks |
-| --- | --- |
-| **M8** — validation and preflight | Profiles must be validated before output is enabled |
-| **M9** — security | The laser-enable endpoint must not be callable by anything that can reach the port (F12, F13) |
-| **M10** — fixture profiles | This phase is M10's consumer; they are one programme |
-| **PD-4 resolved** | The laser gate must cover the **DMX** path, which M11 does not address |
-| Phase 2 complete | Real transports and verified profiles must exist first |
-| Exact manufacturer manuals | For every Keobin and GigBAR model and mode in the rig |
+- Phase 3A shared feature vocabulary;
+- M3 atomic persistence;
+- explicit packaging and license decisions for any decoder or analyzer;
+- a defined relationship between track identity and cached artifacts.
 
 ## Deliverables
 
-1. **Keobin support** — profiled from the manual for the exact model, modelled
-   as several logical fixtures over one address block so the laser sections sit
-   behind the gate rather than inside a general profile.
-2. **Exact GigBAR model and mode support** — same composite modelling; PARs and
-   derbies reuse the shared renderers.
-3. **The laser gate**, in full: master enable defaulting off on every start,
-   per-session manual confirmation, gating at both renderer and transport,
-   startup blackout, disconnect blackout, duration limits with an independent
-   watchdog, unknown-channel fail-closed, test mode excluding emission, audit
-   logging, emergency blackout.
-4. **Haze support** with warm-up tracking, output/fan separation where the
-   machine provides it, maximum duty cycle enforced **at generation time**,
-   minimum off period, early cue scheduling with a venue lead time, cooldown,
+1. Audio-file decoding into the same normalized feature vocabulary.
+2. Cached feature timelines keyed by content identity, analyzer version, and
+   analysis configuration.
+3. Prepared shows and known-track lookup.
+4. Optional future-aware annotations such as structural boundaries and silence.
+5. Manual corrections stored separately from generated analysis.
+6. Graceful fallback to live analysis when a file or cache is unavailable,
+   unknown, invalid, or stale.
+
+## Validation
+
+- Repeated analysis is deterministic within defined numerical tolerances.
+- Cache invalidation is exercised for content, version, and configuration
+  changes.
+- Manual corrections survive re-analysis or fail with an explicit explanation.
+- A cached timeline and a live replay use compatible downstream state and cue
+  logic.
+- Absence of offline analysis never prevents live party mode from starting.
+
+## Completion boundary
+
+A prepared or known track can reuse cached analysis and manual corrections
+without creating a second cue engine. The application still treats live capture
+as the runtime source of truth during unprepared playback.
+
+---
+
+# Phase 3C — Native renderer
+
+**Incremental replacement path. LedFx remains available during migration.**
+
+## Prerequisites
+
+- Phases 1 and 2;
+- Phase 3A semantic cues;
+- measured fixture and network behavior;
+- exact fixture profiles for devices receiving physical output.
+
+## Deliverables
+
+1. Layer-based native WLED effects driven by semantic cues.
+2. State-oriented WLED control for presets, brightness, segments, colors,
+   palettes, and lower-rate changes.
+3. Realtime pixel transport for custom effects using a protocol validated
+   against supported hardware; DDP is a candidate, not a commitment.
+4. Semantic DMX rendering into complete universes at a fixed rate.
+5. Fixture renderers for PARs, bars, and composite multi-effect fixtures.
+6. Styles and presets that configure semantic mappings without placing channel
+   numbers above the fixture layer.
+7. Independent WLED and DMX output loops using bounded latest-state-wins
+   handoffs.
+8. Safe frame dropping and diagnostics for missed deadlines.
+9. LedFx parity comparisons for the existing scenes operators rely on.
+10. Retained LedFx compatibility until native rendering is demonstrably
+    reliable.
+
+## Initial performance budgets
+
+- native WLED rendering around 30–60 frames per second;
+- DMX output around 30–44 frames per second;
+- capture-to-visible response under approximately 80 ms.
+
+The rates are measured budgets, not hardcoded guarantees. Actual WLED firmware,
+pixel counts, network load, DMX node behavior, and fixture response determine
+supported settings.
+
+## Validation
+
+- The same semantic cue log can drive LedFx compatibility, native WLED, and DMX
+  recording paths for comparison.
+- Direct and LedFx ownership cannot overlap on one WLED device.
+- Pixel streaming never uses the low-rate state path.
+- DMX output uses explicit universe/start-address patches and complete frames.
+- Missed frames are skipped, not replayed late.
+- Emergency blackout, laser gating, strobe limits, intensity ceilings,
+  atmosphere limits, freeze/hold, manual override, and loss-of-signal policy
+  are exercised before physical rollout.
+
+## Completion boundary
+
+Native rendering is demonstrably reliable on supported devices, has measured
+performance, and has explicit parity results. LedFx removal is not required for
+completion and is a separate later decision.
+
+---
+
+# Phase 4 — Advanced fixtures and safety policy
+
+**Safety-critical.**
+
+## Prerequisites
+
+- Phase 3C fixture-aware renderer;
+- M8 preflight;
+- M9 operator-access policy;
+- M10 fixture profiles;
+- exact manufacturer manuals;
+- the full policy in [laser_and_haze_safety.md](laser_and_haze_safety.md).
+
+## Deliverables
+
+1. Renderer integration and native-Windows commissioning for exact-model
+   Keobin and GigBAR-family composite profiles supplied by M10; no second
+   profile schema or migration path.
+2. Laser master enable defaulting off, deliberate per-session confirmation,
+   renderer and transport gates, startup/disconnect blackout, duration limits,
+   watchdog, audit log, and non-emitting test mode.
+3. Strobe limits and intensity ceilings enforced after creative priorities.
+4. Haze warm-up, separate output/fan capabilities where applicable,
+   duty-cycle and minimum-off policy, rate limiting, cooldown, manual override,
    and disconnect-to-off.
-5. **Generator enforcement of PD-9** — a style mapping haze to beat- or
-   onset-level features fails validation.
+5. Safe freeze/hold and loss-of-signal transitions.
+6. Emergency blackout independent of the audio, cue, and ordinary render
+   pipelines.
 
-## Validation requirements
+## Validation
 
-- Every profile verified against the manual **and** against the physical
-  fixture, on native Windows.
-- The laser gate verified by attempting to emit through every path and
-  confirming refusal — including from a generated cue, a manual override, and a
-  high-priority cue.
-- Duty-cycle and minimum-off enforcement verified in simulation before any
-  physical haze.
-- Emergency blackout verified from a running show, a stalled scheduler, and a
-  crashed process.
-- Watchdog verified by deliberately stalling the show engine.
-- Audit log verified to survive an abrupt termination.
-
-## Risks
-
-| Risk | Severity | Mitigation |
-| --- | --- | --- |
-| Laser emission from an unverified or wrong profile | **Safety-critical** | `verified: false` blocks physical output; gate is independent of profile correctness |
-| The gate implemented partially | **Safety-critical** | It is specified as a set; a subset produces a system that appears gated and is not |
-| Haze mapped to beats through a style | High | PD-9 enforced in the generator, not just documented |
-| Fire-alarm activation from haze | High | Venue policy and detection state confirmed by the operator before use; duty-cycle limits reduce but do not eliminate the risk |
-| Wrong GigBAR generation assumed | High | Exact model and mode recorded in the profile `source` field; no generic GigBAR profile |
-| M11's ILDA scope mistaken for covering DMX lasers | High | PD-4 exists precisely because it does not |
-
-## Completion criteria
-
-- Keobin and the exact GigBAR model operate from verified profiles.
-- Every laser control in the safety document is implemented and individually
-  verified.
-- Haze operates under enforced duty-cycle and minimum-off rules.
-- The relevant native-Windows checklist rows are marked.
-- A `lights-dmx-safety-audit` equivalent review has passed on the branch.
-
-## Likely user-facing improvement
-
-**High, and the highest-risk.** The full rig becomes controllable from a show
-timeline. This is also the phase where a mistake damages equipment or harms
-someone, which is why its prerequisite list is the longest in the document.
+- Simulate every safety policy with null and recording transports first.
+- Verify profiles against manuals and physical fixtures on native Windows.
+- Attempt to bypass gates through generated, manual, and high-priority cues.
+- Stall capture, state estimation, cue generation, and rendering separately.
+- Confirm software controls do not get documented as legal or venue-compliance
+  guarantees.
 
 ---
 
-# Phase 5 — Advanced synchronization and editing
+# Phase 5 — Calibration, diagnostics, and authoring
 
 ## Prerequisites
 
-| Prerequisite | Why it blocks |
-| --- | --- |
-| **M5** — pacing and runtime state | Synchronization on a disk-polling control bus measures disk behaviour |
-| **OQ-6 answered** | The target DMX refresh rate, measured on the rig |
-| **PD-7 decided** | Whether authoritative show time comes from browser or backend playback |
-| Phases 2 and 3 complete | Nothing to synchronize otherwise |
+- Phases 3A and 3C;
+- a stable recording format;
+- measured hardware timing.
 
 ## Deliverables
 
-1. **Monotonic playback clock**, with audio position as authoritative show time
-   and drift measured and corrected.
-2. **Lookahead scheduler** — priority queue, configurable horizon, dispatch at
-   `cue.t − latency[device]`, with an explicit invalidation path on seek.
-3. **Per-device latency calibration** — measured on the rig, stored on the
-   fixture instance.
-4. **Fixed-rate DMX rendering** at the OQ-6 rate; WLED pixel output on its own
-   tick.
-5. **WLED realtime UDP/DDP pixel transport.**
-6. **Improved section and downbeat detection**, including the deferred **Essentia
-   evaluation** — behind the extractor interface, and **only after its licence
-   question is resolved**.
-7. **Manual timeline editing** — cue edits stored separately and surviving
-   regeneration.
-8. **Waveform and cue visualization**, built on the machine-readable diagnostics
-   the recording transport already produces.
-9. **Show templates** — reusable style, group, and intensity configurations.
+1. Per-device latency calibration and long-run drift diagnostics.
+2. Visual inspection tooling built from machine-readable feature, state, cue,
+   WLED, and DMX logs.
+3. Manual cue and prepared-track correction workflows.
+4. Reusable styles, fixture groups, and intensity profiles.
+5. Operational dashboards for capture health, queue depth, dropped frames,
+   transport state, and active safety policy.
 
-## Validation requirements
-
-- Timing accuracy measured against the rig on native Windows — the only
-  environment where the measurement means anything (D-8).
-- Drift measured over a full track, not a short sample.
-- Latency compensation verified per device class, including the very different
-  haze lead time.
-- Seek, pause, and resume verified not to leave stale dispatched cues.
-- Manual edits verified to survive regeneration.
-- WLED realtime throughput measured at realistic pixel counts.
-
-## Risks
-
-| Risk | Severity | Mitigation |
-| --- | --- | --- |
-| Browser-based playback position adds unbounded network jitter | High | PD-7; if browser playback wins, the jitter budget must be measured before the scheduler is designed around it |
-| Lookahead horizon makes seeking awkward | Moderate | Explicit invalidation; treat seek as a first-class operation from the start |
-| WLED realtime saturates the network at high pixel counts | Moderate | Measure early; rate-limit per device |
-| Essentia adopted before the AGPL question is resolved | **Blocking if it happens** | Licence decision precedes the evaluation branch |
-| The timeline editor expands without bound | Moderate | Diagnostics view and editor are separate deliverables; the frontend has no build step, which is a real constraint on editor scope |
-
-## Completion criteria
-
-- Cues land within a measured, documented tolerance on the rig.
-- Drift is bounded over a full track.
-- The operator can correct a mis-detected downbeat and see the show change.
-- WLED pixel effects run synchronized with DMX output.
-
-## Likely user-facing improvement
-
-**Transformative.** This is the phase where the system stops being "lights that
-react" and becomes "a show that is synchronized". Everything before it builds
-the machinery; this is where the machinery is aimed.
+The diagnostic format precedes any editor. A full frontend timeline editor is
+optional and must be scoped separately.
 
 ---
 
-# Cross-phase notes
+# Subsequent documentation/tooling increment — Mermaid
 
-## What must never be compromised, in any phase
+Mermaid diagrams may be added after this branch as a dedicated documentation or
+tooling increment. That work should translate the approved text architecture;
+it must not silently decide unresolved schemas, transports, algorithms, or
+ownership. No Mermaid diagram or dependency is part of
+`docs/live-renderer-architecture`.
 
-1. **The semantic boundary** (PD-1). No channel numbers above the fixture layer.
-2. **Fail closed** for unknown fixtures, modes, and capabilities.
-3. **Hardware-free by default.** Every phase's work is developed and tested
-   without the rig; the rig confirms, it does not develop.
-4. **No WSL2 result is HARDWARE VERIFIED** (D-8). Not once, not for a small
-   thing.
-5. **The laser gate is not priority-resolvable.** Creative mechanisms and safety
-   mechanisms do not share a code path.
-6. **Haze is never beat-mapped** (PD-9).
+---
 
-## Where this roadmap could be wrong
+# Cross-phase rules
 
-Recorded honestly, because it is a plan and plans are hypotheses:
-
-- **If PD-10 resolves toward "better manual authoring, not generation"**, Phase 3
-  shrinks to analysis-plus-alignment and Phase 5's editor moves much earlier.
-  The audio layer is needed either way; the generator may not be.
-- **If PD-8 resolves toward "LedFx only"**, entries for direct WLED control and
-  realtime pixel output leave Phases 2 and 5 entirely, and the WLED story stops
-  at scene selection.
-- **If OQ-5 reveals installations that cannot be migrated safely**, the
-  addressing migration in Phase 2 may need a compatibility mode, which changes
-  its shape substantially.
-- **If the packaged-executable licence review blocks FFmpeg bundling**, audio
-  analysis may become a development-host activity that produces artifacts
-  shipped alongside shows, rather than a feature of the distributed application.
-  That is a significant change to Phase 3's deliverable, and it should be
-  checked early rather than discovered at packaging time.
+1. Live capture is party mode's runtime source of truth.
+2. Spotify metadata is optional enhancement, not raw audio.
+3. Offline analysis is optional and uses the shared feature vocabulary.
+4. No channel numbers cross the semantic cue boundary.
+5. Fixture addressing is explicit.
+6. LedFx remains a compatibility adapter until native rendering is proven.
+7. Unknown fixtures and modes fail closed.
+8. Safety policy is not priority-resolvable.
+9. Hardware-free replay is the primary regression mechanism.
+10. WSL2 results never earn HARDWARE VERIFIED status.
+11. Python remains primary until profiling demonstrates a native-code need.

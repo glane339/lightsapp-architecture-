@@ -319,6 +319,30 @@ preflight service exists. Components here are candidates, not a committed
 design. Where a component's *shape* is genuinely undecided, it is marked
 PROPOSED and appears as an open question in [decisions.md](decisions.md).
 
+The live analyzer and renderer direction is now approved at its architectural
+boundaries, while its implementation shape remains proposed. The canonical
+description is [show_control_architecture.md](show_control_architecture.md);
+this document does not duplicate it. In summary:
+
+```text
+system-audio loopback (preferred) / microphone / file / replay
+        ↓
+shared normalized features
+        ↓
+stabilized live musical state
+        ↓
+semantic cues
+        ↓
+LedFx compatibility / native WLED / fixture-aware DMX
+```
+
+That direction does not claim any of those new components exist. It also does
+not make offline file analysis the primary mode: unpredictable Spotify
+playback makes live capture party mode's runtime source of truth. The renderer
+will grow incrementally beside LedFx, and all physical output remains subject
+to explicit fixture patches, preflight, injectable transports, blackout, and
+safety policy.
+
 Three things below are precursor seams that **do** already exist in code, and
 the diagram marks them. Do not read their presence as evidence that the
 surrounding structure exists:

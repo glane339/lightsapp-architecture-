@@ -25,18 +25,20 @@ repository, read the first four in order.
 | [docs/decisions.md](docs/decisions.md) | Accepted decisions (D-1…) and open questions needing an owner (OQ-1…) |
 | [docs/session_handoff.md](docs/session_handoff.md) | Operational state for the next session |
 
-A second set describes where Lights is proposed to go: a synchronized
-show-control system driving WLED and DMX fixtures from analyzed audio files.
-**None of it is implemented**, and every document says so in its own banner.
+A second set describes the approved direction: a live-first party renderer
+driven primarily by real-time system-audio capture, with microphone fallback,
+optional offline analysis, a semantic cue engine, an incremental native WLED
+renderer, LedFx compatibility, and fixture-aware DMX output. **None of those new
+components is implemented**, and every document says so in its own banner.
 
 | Document | What it answers |
 | --- | --- |
-| [docs/show_control_architecture.md](docs/show_control_architecture.md) | The layered show-control architecture, and a capability-by-capability current-versus-future table |
-| [docs/audio_reactivity_architecture.md](docs/audio_reactivity_architecture.md) | Why complete-file analysis beats microphone-only, and how the audio pipeline would work |
-| [docs/fixture_and_transport_strategy.md](docs/fixture_and_transport_strategy.md) | Fixture profiles as data, capability-based rendering, and the WLED/DMX transports |
+| [docs/show_control_architecture.md](docs/show_control_architecture.md) | Canonical live-first architecture: sources → features → musical state → semantic cues → fixture rendering |
+| [docs/audio_reactivity_architecture.md](docs/audio_reactivity_architecture.md) | System-audio preference, microphone fallback, shared features, transitions, offline enhancement, and replay |
+| [docs/fixture_and_transport_strategy.md](docs/fixture_and_transport_strategy.md) | Fixture profiles, LedFx migration, native WLED modes, capability rendering, and fixed-rate DMX output |
 | [docs/laser_and_haze_safety.md](docs/laser_and_haze_safety.md) | Safety policy for laser and haze output — **read before any laser or haze work** |
 | [docs/show_control_recommendations.md](docs/show_control_recommendations.md) | Every recommended library and tool, with rationale, prerequisites, licensing risk, and impact |
-| [docs/show_control_roadmap.md](docs/show_control_roadmap.md) | Phases 1–5, and how they depend on the M0–M12 milestones |
+| [docs/show_control_roadmap.md](docs/show_control_roadmap.md) | Foundations plus Phase 3A live analyzer, 3B optional offline analysis, and 3C native renderer |
 
 Two conventions carry across all of these. Every substantive claim is labeled
 with how much confidence it has earned — VERIFIED CURRENT BEHAVIOR, DESIGN
@@ -189,6 +191,14 @@ tooling under `scripts/`. See [docs/architecture.md](docs/architecture.md)
 Part 3 for what exists versus what is proposed, and
 [docs/roadmap.md](docs/roadmap.md) for the order in which the rest is being
 approached.
+
+The primary future use case is party operation against unpredictable Spotify
+playback. Live system-audio capture is the intended runtime source of truth;
+Spotify metadata is only an optional identity/transition enhancement;
+microphone capture is the fallback; and offline file analysis is an optional
+prepared-track and testing capability. The native renderer will be developed
+incrementally while LedFx remains available for existing WLED scenes. See the
+canonical [live show-control architecture](docs/show_control_architecture.md).
 
 ## Optional user-local aliases
 

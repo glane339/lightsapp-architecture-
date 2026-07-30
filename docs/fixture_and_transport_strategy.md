@@ -1,12 +1,14 @@
 # Fixture and Transport Strategy
 
-**Status of this document:** PROPOSED. Established on branch
-`docs/lighting-audio-show-control-architecture` against HEAD `bc91b77`.
+**Status of this document:** TARGET ARCHITECTURE accepted by decisions D-16,
+D-17, and D-20; PROPOSED implementation detail. Updated on branch
+`docs/live-renderer-architecture`.
 
-This document covers the fixture-definition, rendering, and transport layers of
-[show_control_architecture.md](show_control_architecture.md): how fixtures are
-described as data, how semantic actions become channel values, and how those
-values reach WLED and DMX devices.
+This document expands the fixture-definition, rendering, and transport layers
+of the canonical
+[live show-control architecture](show_control_architecture.md): how fixtures
+are described as data, how semantic actions become channel values, and how
+those values reach LedFx, WLED, and DMX devices.
 
 **No fixture profile system, capability model, patch model, or injectable
 transport exists in this repository today.** Part 1 records what does exist.
@@ -280,8 +282,8 @@ Two properties follow directly from purity, and both are the point:
 Two distinct render targets, and conflating them is the classic mistake:
 
 - **State rendering** — `dimmer`, `color_*`, `effect_select` become a WLED JSON
-  state object (power, brightness, segment colour, effect). Low rate,
-  request/response, idempotent.
+  state object (power, brightness, presets, segments, colour, palette, effect).
+  Low rate, request/response, idempotent.
 - **Pixel rendering** — `pixel_frame` produces a raw pixel buffer for realtime
   UDP/DDP streaming. High rate, fire-and-forget, stateless.
 
@@ -289,6 +291,33 @@ They use different transports, different rates, and different failure semantics.
 A cue that sets a palette goes through state; a cue that drives a chase at 40 fps
 goes through pixels. Sending pixel-rate updates through the JSON API is the
 failure mode this separation exists to prevent.
+
+DDP is a likely realtime option, not a locked transport decision. The selected
+protocol must be supported by the actual WLED firmware and validated at
+representative pixel counts, frame rates, and network conditions. Initial WLED
+rendering targets of approximately 30–60 frames per second are nonbinding
+budgets and must be measured on the supported rig.
+
+## Rendering complete DMX universes
+
+The future DMX renderer is a fixed-rate, latest-state-wins loop. On each tick it:
+
+1. reads the latest musical state and active semantic effects;
+2. evaluates semantic effects at the current render time;
+3. resolves fixture targets, layers, and priorities;
+4. builds a complete frame for each universe from explicit fixture patches;
+5. applies safety policy and documented safe values;
+6. sends through an injected real, null, or recording `DmxTransport`.
+
+It does not concatenate fixture arrays, read durable JSON in the high-frequency
+path, or accumulate a queue of stale frames. A missed render deadline skips the
+obsolete frame. An initial DMX output budget of approximately 30–44 frames per
+second is nonbinding and must be measured on the real node and fixtures.
+
+Renderer output is still subject to safety gates after creative priority
+resolution. Laser enable, strobe limits, intensity ceilings, atmosphere rate
+limits, emergency blackout, and loss-of-signal policy cannot be overridden by
+a high-priority cue.
 
 ---
 
@@ -324,12 +353,12 @@ Matrices additionally need a width/height and a mapping order, and a
 linear strip. Device discovery, firmware version, and pixel count should be read
 from the device rather than configured by hand where WLED exposes them.
 
-**The open question (PD-8):** whether Lights addresses WLED directly or
-continues through LedFx. LedFx gives audio-reactive effects for free but takes
-away frame-level control and adds a process dependency; direct control gives
-frame-level determinism but means reimplementing effects. They are not exclusive
-— direct control for show-critical pixel cues, LedFx for named ambient scenes,
-is a plausible answer. It needs an owner decision.
+**Approved migration direction:** Lights incrementally adds direct WLED control
+while retaining LedFx as a compatibility adapter. Native state control covers
+lower-rate changes; native pixel streaming covers new custom effects; LedFx
+continues serving existing scenes until native behavior is reliable and parity
+has been evaluated. Exact per-device ownership and the validated realtime
+transport remain implementation decisions.
 
 ## Generic RGB / RGBW PARs
 
@@ -419,11 +448,36 @@ capabilities — running the fan without output is a legitimate and useful state
 
 Haze is governed by duty-cycle rules, minimum off periods, warm-up, and
 cooldown, all in [laser_and_haze_safety.md](laser_and_haze_safety.md). It is
-**never** driven by beat- or onset-level features (PD-9).
+**never** driven by beat- or onset-level features (D-20).
 
 ---
 
 # Part 6 — Transport strategy
+
+## Incremental LedFx compatibility
+
+LedFx remains part of the migration:
+
+```text
+current scene activation
+        ↓
+custom live analyzer and semantic cue engine
+        ↓
+├── LedFx compatibility adapter for existing WLED scenes
+├── native WLED state and pixel renderers
+└── fixture-aware DMX renderer
+```
+
+The current `LEDFXClient` is not injectable and couples its destination to the
+FastAPI bind host. M2 and M7 must first turn it into a configured adapter with
+explicit failure behavior. Existing scenes remain usable through that adapter
+while native effects are developed and compared. Immediate LedFx removal is not
+a goal; removal can be considered only after native rendering is demonstrably
+reliable and required scene behavior has a supported replacement.
+
+LedFx and native output must not control the same WLED device concurrently.
+Ownership is explicit per device and changes through a controlled transition,
+including a defined safe state.
 
 ## DMX transports
 
@@ -432,7 +486,7 @@ cooldown, all in [laser_and_haze_safety.md](laser_and_haze_safety.md). It is
 | **sACN (current)** | Already working, already the deployment path | Standards-based, network-only. The existing monkey-patch of the library's socket send should be revisited when the transport becomes injectable |
 | **Art-Net** | Straightforward addition alongside sACN | Widely supported by nodes; some rigs only speak one of the two |
 | **OLA (`olad`)** | Strong option if USB-DMX interfaces are ever used | Adds a daemon to the deployment; largely a Linux-first story, which matters given Windows deployment (see below) |
-| **Mock / recording** | **Required, not optional** | Enables full-song simulation and regression testing with no rig |
+| **Mock / recording** | **Required, not optional** | Enables deterministic capture or timeline replay and regression testing with no rig |
 
 **The OLA caveat specific to this repository.** Lights deploys on native Windows
 (`build_exe.py`, `run.bat`, [platform_support.md](platform_support.md)). OLA's
@@ -449,17 +503,19 @@ possible, and it is the highest-leverage item in Phase 1.
 
 ## WLED transports
 
-Three separate transports, not one:
+Two output modes, represented by separate transport responsibilities:
 
 | Transport | Use | Rate |
 | --- | --- | --- |
 | JSON API over HTTP | Power, brightness, segments, presets, effects | Low; per cue |
-| WebSocket | State updates and push notification; avoids polling | Low; event-driven |
-| Realtime UDP / DDP | Pixel frames for synchronized effects | High; per frame |
+| Realtime pixel protocol, such as DDP if validated | Custom pixel frames | High; per frame |
 
+A WebSocket may later provide state updates or another supported control path,
+but it is an implementation option rather than a required third output mode.
 The realtime transport must **not** be reached through the JSON path, and the
-JSON path must not be used to push per-frame updates. Keeping them as separate
-types makes the mistake impossible rather than merely discouraged.
+JSON path must not be used to push per-frame updates. Keeping state and pixel
+responsibilities separate makes the mistake impossible rather than merely
+discouraged.
 
 ## Transport lifecycle, shared
 
@@ -476,6 +532,10 @@ latency_ms: int
 `blackout()` is required on every transport, must be idempotent, must be
 callable from a shutdown handler, and must not depend on the show engine being
 in a valid state. It is the mechanism the safety document relies on.
+
+These lifecycle concepts do not imply that LedFx, WLED state, WLED pixels, and
+DMX share one artificial data-plane interface. Their payloads, rates, and
+failure semantics remain protocol-appropriate.
 
 ---
 
@@ -502,7 +562,7 @@ in a valid state. It is the mechanism the safety document relies on.
 | An unverified profile drives a real fixture | High | `verified: false` blocks physical output; profiles carry their manual source |
 | Imported OFL/QLC+ profiles are wrong for the exact model | High | Import sets `verified: false`; manual check required before output |
 | Laser capability added without the gate | **Safety-critical** | Laser capabilities are gated at the renderer *and* the transport, and the gate is not priority-resolvable |
-| Haze mapped to beats | High (equipment + venue) | Normative prohibition, PD-9; enforced in the generator, not just documented |
+| Haze mapped to beats | High (equipment + venue) | Normative prohibition, D-20; enforced in the generator, not just documented |
 | OLA adopted without resolving the Windows story | Moderate | Decide the deployment model before Phase 2, not during |
 | WLED realtime pushed through the JSON path | Moderate | Separate transport types |
 | Fixture library licensing restricts redistribution | Moderate | Verify OFL and QLC+ licence terms before shipping any imported profile in the packaged executable |

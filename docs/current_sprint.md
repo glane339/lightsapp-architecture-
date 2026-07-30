@@ -3,33 +3,38 @@
 **Status of this document:** canonical, and the shortest-lived document in this
 set. Update it when a milestone completes.
 
-## In progress: M0 — Documentation and repository truth
+## In progress: live-first renderer architecture documentation
 
-**Branch:** `docs/repository-baseline`
-**Base HEAD:** `01e6ba8`
-**Scope:** documentation only. No production code, no frontend code, no
-dependency changes.
+**Branch:** `docs/live-renderer-architecture`
+**Base HEAD:** `a33ecb3`
+**Scope:** documentation only. No production code, tests, frontend code,
+dependencies, transports, renderer classes, audio capture, Spotify
+integration, or Mermaid diagrams.
+
+This increment records a clarified primary use case: Lights normally runs at
+parties with unpredictable Spotify playback and cannot assume the original file
+is available. It updates the proposed show-control programme without changing
+the stabilization milestone order.
 
 ### Definition of done
 
-- [x] Existing documentation inventoried
-- [x] Canonical documentation set created
-- [x] Verified audit findings recorded with evidence labels
-- [x] Creator design intent captured and labeled DESIGN INTENT
-- [x] Target architecture captured and labeled TARGET ARCHITECTURE / PROPOSED
-- [x] Dependency-ordered roadmap (the M0–M12 range)
-- [x] WSL2 / native-Windows policy stated
-- [x] Decisions and open questions recorded
-- [x] README navigation updated
-- [x] Stale documents marked, not deleted
-- [ ] Independent documentation audit
+- [x] Required architecture and implementation context inspected
+- [x] Live system-audio capture established as the preferred party source
+- [x] Microphone fallback and optional offline analysis distinguished
+- [x] Shared normalized feature and live musical-state boundaries documented
+- [x] Semantic cue and fixture-rendering layers documented
+- [x] LedFx compatibility and incremental native WLED/DMX migration documented
+- [x] Runtime budgets, transition handling, and deterministic replay documented
+- [x] Safety boundaries preserved and expanded
+- [x] Roadmap split into Phase 3A, 3B, and 3C
+- [x] Accepted decisions D-13 through D-20 recorded
+- [x] Documentation consistency and link validation
 
-### Nonblocking follow-ups
+### Subsequent documentation increment
 
-Neither gates M0 nor blocks M1.
-
-- OQ-1 — owner confirms the milestone numbering range. Work proceeds under
-  M0–M12 until told otherwise.
+Mermaid diagrams may translate the approved text architecture after this
+branch. They are not part of this sprint and must not decide unresolved
+implementation choices.
 
 ---
 

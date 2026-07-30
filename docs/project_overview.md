@@ -34,7 +34,8 @@ described as implemented without repository evidence.
 Lights is a single-operator lighting controller for one specific lighting rig.
 It is a FastAPI backend serving a vanilla-JavaScript frontend, persisting all
 state as JSON files, and driving three output paths: DMX over sACN/E1.31,
-LedFx/WLED over HTTP, and ILDA laser-frame parsing and sequencing.
+LedFx scene activation over HTTP (with WLED behind the external LedFx process),
+and ILDA laser-frame parsing and sequencing.
 
 It is a compact and coherent prototype rather than a general-purpose lighting
 platform. The domain model is recognizable and the workflow is consistent —
@@ -139,7 +140,9 @@ review. They are the reasons incremental stabilization is the right strategy.
 4. Browser-side microphone analysis is a sound design: raw audio never leaves
    the browser, and the backend receives derived beat events instead of an
    audio stream. The design is readable from the code; whether the capture
-   works in a host browser is CODE-INSPECTED ONLY.
+   works in a host browser is CODE-INSPECTED ONLY. This is a strength of the
+   current implementation, not a commitment that the future system-audio source
+   must remain browser-side.
 5. Pydantic models already validate data on read.
 6. Governance and handoff documentation is unusually strong for a prototype.
 7. The ILDA subsystem is the most cohesive part of the codebase: it uses a
@@ -159,6 +162,22 @@ Incremental modernization, in dependency order, tracked in
 importable without side effects, establishing hardware-safe tests, and making
 persistence atomic and its failures explicit. Everything else depends on those
 three.
+
+The approved show-control direction is live-first. Lights is primarily intended
+for parties with unpredictable Spotify playback, where the original audio file
+is usually unavailable before a track begins. Real-time system-audio capture is
+the planned source of truth, microphone capture is the fallback, Spotify
+metadata is an optional identity and transition enhancement, and offline file
+analysis remains optional for prepared tracks, cached analysis, testing, and
+special events.
+
+The future pipeline normalizes every source into a shared feature vocabulary,
+stabilizes live musical-state estimates, emits semantic cues, and renders them
+through a retained LedFx compatibility adapter, a growing native WLED renderer,
+and a fixture-aware DMX renderer. Lasers and atmosphere remain behind explicit
+safety policy. **None of these future components exists today.** The canonical
+description and current-versus-future table are in
+[show_control_architecture.md](show_control_architecture.md).
 
 ## Related documents
 
