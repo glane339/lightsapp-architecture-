@@ -68,6 +68,31 @@ drop UDP. There is no WSL2 equivalent to test against.
 Windows. `backend/main.py:20-27` already branches on `sys.frozen` for portable
 path resolution, and that branch is only exercisable in a real frozen build.
 
+## Future live-audio capture
+
+The approved renderer direction prefers system-audio loopback for party mode,
+with microphone fallback. The architecture is not permanently tied to one
+operating-system API:
+
+- WASAPI loopback is a candidate for the supported Windows show host;
+- another platform must use an equivalent supported capture mechanism behind
+  the same source boundary;
+- microphone, decoded-file, synthetic, and replay sources use that boundary
+  without changing downstream features or cues.
+
+WSL2 development may validate source-independent normalization, estimation, and
+replay against files or synthetic inputs. It cannot validate native-Windows
+loopback device selection, audio-driver behavior, capture discontinuities,
+exclusive/shared mode interaction, or end-to-end latency.
+
+The initial budgets in
+[show_control_architecture.md](show_control_architecture.md) — 10–20 ms audio
+chunks, 50–100 Hz feature updates, 20–50 Hz musical-state updates, 30–60 FPS
+WLED rendering, 30–44 FPS DMX output, and under approximately 80 ms visual
+latency — are nonbinding. They must be measured on the actual show host,
+network, WLED devices, DMX node, and fixtures before any supported-performance
+claim.
+
 ## Cross-platform engineering principles
 
 These apply to all code written in this repository:
@@ -193,6 +218,10 @@ repository carries a HARDWARE VERIFIED label.
 | Windows Defender Firewall permits output | M9 | ☐ |
 | Physical DMX fixtures respond as expected | M5 | ☐ |
 | Real LedFx/WLED deployment responds | M7 | ☐ |
-| Browser microphone works in the host browser | M6 | ☐ |
+| Existing browser microphone works in the host browser | Phase 3A migration baseline | ☐ |
+| System-audio loopback captures the intended program signal | Phase 3A | ☐ |
+| Loopback loss/recovery and track transitions behave as specified | Phase 3A | ☐ |
+| Capture-to-visible latency and dropped-frame budgets are measured | Phase 3A, Phase 3C | ☐ |
+| Native WLED state and realtime pixel output meet measured limits | Phase 3C | ☐ |
 | Laser DAC output, with interlock and e-stop | M11 | ☐ |
 | Blackout and watchdog procedures | M11 | ☐ |

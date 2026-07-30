@@ -1,536 +1,480 @@
-# Show-Control Architecture
+# Live Show-Control Architecture
 
-**Status of this document:** canonical for *direction*, PROPOSED for *content*.
-Established on branch `docs/lighting-audio-show-control-architecture` against
-HEAD `bc91b77`.
+**Status of this document:** canonical TARGET ARCHITECTURE, accepted by
+decisions D-13 through D-20; PROPOSED for implementation details. Updated on branch
+`docs/live-renderer-architecture`.
 
-**Nothing described in Part 2 or later is implemented.** This document describes
-how Lights would evolve into a synchronized show-control system. It is an
-architecture reference and a future implementation specification, not a
-description of the running application. Evidence labels are defined in
-[project_overview.md](project_overview.md) and are used here exactly as they are
-used elsewhere in this set.
+**The live analyzer, normalized feature stream, musical-state estimator,
+semantic cue engine, native WLED renderer, fixture-aware DMX renderer, replay
+harness, and safety policy described below are not implemented.** Part 1
+records the current behavior that does exist. Evidence labels are defined in
+[project_overview.md](project_overview.md).
 
-For what Lights does *today*, read [project_overview.md](project_overview.md)
-and [architecture.md](architecture.md) first. This document assumes both.
+This is the canonical description of the future live renderer. Companion
+documents add detail without redefining the architecture:
 
-## Companion documents
-
-| Document | Covers |
+| Document | Responsibility |
 | --- | --- |
-| [audio_reactivity_architecture.md](audio_reactivity_architecture.md) | Audio decoding, analysis, the feature timeline, and cue-mapping strategy |
-| [fixture_and_transport_strategy.md](fixture_and_transport_strategy.md) | Fixture definitions, capabilities, rendering, and the WLED/DMX transports |
-| [laser_and_haze_safety.md](laser_and_haze_safety.md) | Safety policy for laser and haze output — **read before any laser or haze work** |
-| [show_control_recommendations.md](show_control_recommendations.md) | Every recommended library and tool, with rationale, prerequisites, risks, and impact |
-| [show_control_roadmap.md](show_control_roadmap.md) | Phases 1–5, and how they map onto the existing M0–M12 milestones |
-| [decisions.md](decisions.md) | Proposed decisions PD-1…PD-12 arising from this document |
+| [audio_reactivity_architecture.md](audio_reactivity_architecture.md) | Audio sources, normalized features, live state estimation, transitions, and replay |
+| [fixture_and_transport_strategy.md](fixture_and_transport_strategy.md) | Fixture profiles, capability rendering, LedFx compatibility, WLED, and DMX output |
+| [laser_and_haze_safety.md](laser_and_haze_safety.md) | Normative laser and atmosphere policy |
+| [show_control_roadmap.md](show_control_roadmap.md) | Dependency-ordered delivery phases |
+| [decisions.md](decisions.md) | Accepted decisions and unresolved implementation choices |
 
 ---
 
-# Part 1 — What Lights is today, in show-control terms
+# Part 1 — Current implementation
 
 ## VERIFIED CURRENT BEHAVIOR
 
-This part exists so the rest of the document cannot be misread as a description
-of current capability. Each row was re-checked against HEAD `bc91b77`.
+Lights is currently a single-operator, single-rig, single-universe controller
+with an onset-triggered preset cycler. It is not yet the live show-control
+system described later in this document.
 
-Lights is **not** a generic smart-home lighting application, and it is also not
-yet a show-control system. It is a single-operator, single-rig, single-universe
-DMX controller with an onset-triggered preset cycler and a nonphysical ILDA
-sequencer.
+| Boundary | Current behavior |
+| --- | --- |
+| Audio | `frontend/js/home.js` captures a selected browser microphone, computes spectral flux over low FFT bins, and posts one advance event after a qualifying onset. It does not estimate tempo, beat phase, confidence, or musical state. |
+| Orphaned AI audio code | `frontend/js/ai_mode.js` computes several per-frame values, but its backend package was deleted and the routes are omitted at startup. It is not a functioning analyzer or a supported feature schema. |
+| Active show | Each accepted onset advances the active preset index. Lighting progression therefore depends on onset count rather than a musical clock. |
+| LedFx and WLED | `backend/ledfx/client.py` can list and activate LedFx scenes by name over synchronous HTTP. Lights contains no direct WLED state client and no realtime pixel transport. |
+| DMX | `backend/dmx/mapper.py` sorts devices by `order`, concatenates `active_channels`, pads or truncates to 512 values, and sends one configured sACN universe. Addressing is positional; fixtures have no explicit universe or start address. |
+| DMX runtime | The sender is created at import. Its application loop is unpaced and re-reads `devices.json` on every iteration. Persistent JSON is the live control bus. |
+| Fixtures | `gigbar`, `keobin`, and `haze` behavior is hardcoded across backend and frontend. No fixture-profile or capability-renderer system exists. |
+| Lasers | The ILDA path ends at `LoggingSink` and cannot emit through a DAC. DMX-attached laser channels are reachable through ordinary presets and have no master gate. |
+| Haze | A two-channel manual `haze` device is bootstrapped. No duty-cycle, warm-up, cooldown, or rate policy exists. |
+| Testing | There is no conventional automated test suite or deterministic audio/frame replay harness. |
 
-### The current subsystem boundaries
-
-| Boundary | Where it lives | What it actually does |
-| --- | --- | --- |
-| User interface | `frontend/` — vanilla JS, no build step, served by the `StaticFiles` mount at `/` | Pages for presets, device presets, scenes, full scenes, ILDA, and active show. Fixture knowledge is hardcoded here as well as in the backend. |
-| WLED control | **No direct WLED code exists.** | WLED is reached only indirectly, by asking LedFx to activate a scene by name. There is no WLED JSON API client, no WebSocket client, and no realtime pixel transport in this repository. |
-| LedFx integration | `backend/ledfx/client.py` (63 lines) | `GET /api/scenes`, and `PUT /api/scenes` with `{"id":…, "action":"activate"}`. Host is `config.server_host`, port hardcoded to 8888 (F17). |
-| DMX control | `backend/dmx/sender.py`, `frame.py`, `mapper.py` | One sACN universe, unicast to `config.IP`, 512 channels. `MAPPER` concatenates each device's `active_channels` in `order` sequence. |
-| Audio handling | `frontend/js/home.js` only | Browser microphone → `AnalyserNode` (fftSize 2048) → spectral-flux onset detection over FFT bins 2–6 → `POST /api/active-scene/advance`. |
-| Configuration | `backend/models/config.py`, `backend/paths.py` | A single `CONFIG` JSON object; data directory resolved from `LIGHTSAPP_DATA_DIR` or a per-OS default. |
-| Device models | `backend/models/` — Pydantic | `DMXDevice(id, order, channels, active_channels, control_type)`. No manufacturer, model, mode, universe, or start address. |
-| Persistence | `backend/models/storage.py` (43 lines) | `json.dump` into the destination opened `"w"`. Non-atomic (F7); read failures collapse to `[]`/`None` (F8). |
-| Networking | `sacn` (UDP out), `requests` (LedFx), Uvicorn (bind) | No authentication on any route (F12); CORS wildcarded (F13). |
-| Testing | `backend/ilda/test_reader.py` | A CLI smoke script. There is no pytest suite (F10). |
-
-### The five facts that most constrain this architecture
-
-1. **There is no audio-file path anywhere in the repository.** Audio exists only
-   as a live microphone stream inside the browser. Decoding, analysis, caching,
-   and any notion of a timeline are entirely absent. This is the single largest
-   gap between current state and the target.
-
-2. **The current "beat" signal is an onset trigger, not a clock.** VERIFIED
-   CURRENT BEHAVIOR: `frontend/js/home.js:104-160` computes spectral flux over
-   FFT bins 2–6, compares it to a rolling mean plus a standard-deviation
-   multiplier, requires a rising edge and an 80 ms cooldown, and fires an HTTP
-   POST. There is no tempo estimate, no downbeat, no phase, no section
-   detection, and no confidence value. Sensitivity is a hardcoded constant
-   (`SENSITIVITY = 25`, `home.js:18`). Show time does not exist as a concept.
-
-3. **DMX addressing is implicit and positional.** CODE-INSPECTED ONLY:
-   `backend/dmx/mapper.py:6-10` sorts devices by `order` and concatenates
-   `active_channels`. A fixture's DMX start address is therefore the cumulative
-   length of every preceding device's `active_channels` list. Nothing enforces
-   `len(active_channels) == channels` (F11), so a single wrong-length list
-   silently shifts the address of every downstream fixture. There are no
-   addresses to validate for collisions today, because there are no addresses —
-   only positions.
-
-4. **Only one universe is ever activated.** VERIFIED CURRENT BEHAVIOR:
-   `backend/dmx/sender.py:59` calls `activate_output(self.universe)` once, for
-   `config.universe`. Multi-universe output does not exist.
-
-5. **Persistence is the control bus.** F6. The API writes `devices.json` and the
-   send thread polls it. Any show engine built on top of the current design
-   would inherit disk latency in its output path. This must be fixed (M5) before
-   synchronization work is meaningful.
+The current browser microphone path remains useful evidence and a fallback, but
+it is not the future architecture. The target does not promote its raw FFT-bin
+mapping or per-onset HTTP advancement into the renderer.
 
 ---
 
-# Part 2 — Project vision
+# Part 2 — Primary use case and governing model
 
-## DESIGN INTENT and TARGET ARCHITECTURE
+## TARGET ARCHITECTURE — accepted by D-13 through D-20
 
-Lights is intended to become a **synchronized lighting and effects controller**
-for one operator running one rig to recorded music. It coordinates:
+Lights is primarily intended to run at parties where Spotify playback and its
+queue can change continuously and unpredictably. The application usually will
+not possess the original audio file before a track starts. A design that
+requires whole-file analysis before playback therefore cannot be the primary
+party mode: the file may never be available, a guest may skip the track, and
+the next selection may be unknown until the transition occurs.
 
-- WLED pixel devices (strips and matrices);
-- DMX fixtures generally, addressed and patched rather than positionally
-  concatenated;
-- RGB/RGBW PARs;
-- DMX light bars;
-- Keobin fixtures;
-- Chauvet GigBAR-family multi-effect fixtures;
-- DMX lasers, under the safety policy in
-  [laser_and_haze_safety.md](laser_and_haze_safety.md);
-- DMX haze, under the same document's duty-cycle policy;
-- **complete audio files supplied directly to the application**, analyzed
-  offline;
-- shows that are both automatically generated and manually authored.
-
-It remains a single-operator tool for a known rig. It is not a lighting console,
-not a venue management system, and not a smart-home product. Where a
-general-purpose console would add flexibility, Lights should prefer determinism
-and a short path from "here is the track" to "here is the show".
-
-## Target execution flow
+The governing model is:
 
 ```text
-Audio file
-    ↓
-Audio decoding and normalization          ← one canonical PCM boundary
-    ↓
-Feature extraction                        ← versioned, deterministic
-    ↓
-Time-aligned audio feature timeline       ← cached by content hash
-    ↓
-Show generation                           ← style + fixture groups + overrides
-    ↓
-Semantic cue timeline                     ← NO DMX channel numbers here
-    ↓
-Fixture rendering                         ← capability → channel translation
-    ↓
-WLED and DMX transports                   ← real · null · recording
-    ↓
-Physical devices
+Live audio capture = runtime source of truth
+Spotify metadata   = optional identity and track-change enhancement
+Offline analysis   = optional prepared-track capability
 ```
 
-Two properties of this flow matter more than any individual stage.
+Spotify metadata may help identify a track, confirm a change, or locate cached
+analysis for known material. It is not an audio source, and this architecture
+does not assume Spotify metadata APIs expose arbitrary raw playback audio.
 
-**The pipeline is cut in half at the semantic cue timeline.** Everything above
-it knows about music and nothing about DMX. Everything below it knows about
-fixtures and nothing about music. This is the boundary that makes one analysis
-reusable across rigs, and one rig reusable across tracks. PD-1 records it as a
-proposed binding decision.
+System-audio loopback is the preferred party-mode source because it observes
+the program signal before room acoustics, crowd noise, and microphone placement
+alter it. Microphone capture remains the fallback when loopback is unavailable
+or inappropriate. Audio-file analysis remains valuable for prepared tracks,
+cached analysis, testing, and special events, but it is not a prerequisite for
+ordinary party operation.
 
-**Every stage above "Fixture rendering" is deterministic and hardware-free.**
-Given the same audio file, the same extractor version, and the same generation
-configuration, the show is byte-identical — and can be produced, tested, and
-diffed on WSL2 with no rig present. Only the last two stages need hardware, and
-both have null and recording implementations. This is what makes the whole
-system testable under the constraints in
-[platform_support.md](platform_support.md).
+## Canonical conceptual flow
+
+```text
+Audio sources
+├── System-audio loopback — preferred party-mode source
+├── Microphone — fallback source
+├── Audio file — prepared-track and testing source
+└── Recorded/replayed capture — deterministic testing source
+          ↓
+Normalized real-time audio features
+          ↓
+Stabilized musical state
+          ↓
+Semantic cue/effect engine
+          ↓
+Fixture-aware rendering
+├── LedFx compatibility adapter
+├── Native WLED renderer
+└── DMX renderer
+    ├── PARs and bars
+    ├── multi-effect fixtures
+    ├── safety-gated lasers
+    └── rate-limited haze/atmosphere
+```
+
+Live and offline inputs must eventually produce the same normalized
+audio-feature vocabulary. Downstream state estimation and cue generation
+consume that vocabulary rather than branching on whether samples came from
+loopback, a microphone, a decoded file, or a replay log.
 
 ---
 
-# Part 3 — Recommended architecture
+# Part 3 — Four-stage renderer
 
-## TARGET ARCHITECTURE
+The future renderer has four conceptual stages:
 
-Six layers, each with a single responsibility and an explicit interface to the
-next. The layer boundaries are the deliverable; the specific libraries behind
-them are replaceable and are argued separately in
-[show_control_recommendations.md](show_control_recommendations.md).
+1. **Feature normalization** converts a source-specific signal into a
+   source-independent feature stream.
+2. **Musical-state estimation** stabilizes noisy observations into useful live
+   estimates.
+3. **Semantic cue generation** decides what visual or atmospheric action is
+   appropriate.
+4. **Device- and fixture-specific rendering** translates that intent into
+   LedFx scene changes, WLED state or pixel output, and complete DMX universe
+   frames.
 
-```text
-┌───────────────────────────────────────────────────────────────────────┐
-│  AUDIO ANALYSIS LAYER                        offline · deterministic  │
-│  decode → normalize → extract → confidence → cache                    │
-│  output: AudioFeatureTimeline (versioned artifact, keyed by hash)     │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │  knows: music.  knows nothing of fixtures.
-┌───────────────────────────────▼───────────────────────────────────────┐
-│  SHOW-GENERATION LAYER                       offline · deterministic  │
-│  style + fixture groups + intensity profile + manual edits            │
-│  conflict resolution by cue priority                                  │
-│  output: ShowTimeline of semantic Cues                                │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │  ═══ THE SEMANTIC BOUNDARY (PD-1) ═══
-                                │  no channel numbers cross this line
-┌───────────────────────────────▼───────────────────────────────────────┐
-│  FIXTURE-DEFINITION LAYER                    data · validated · fails closed │
-│  manufacturer · model · mode · channels · capabilities                │
-│  instances: universe · start address · groups                         │
-│  validation: address collision · universe bounds · unknown mode       │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │
-┌───────────────────────────────▼───────────────────────────────────────┐
-│  RENDERING LAYER                             pure functions           │
-│  semantic action + fixture mode → channel values / WLED state / pixels│
-│  renderers reusable BY CAPABILITY, not by fixture name                │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │
-┌───────────────────────────────▼───────────────────────────────────────┐
-│  TRANSPORT LAYER                             real · null · recording  │
-│  WledJsonTransport · WledRealtimeTransport · DmxTransport             │
-│  blackout · safe shutdown · latency compensation hooks                │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │
-┌───────────────────────────────▼───────────────────────────────────────┐
-│  TIMELINE AND SYNCHRONIZATION LAYER          the only owner of TIME   │
-│  monotonic clock · playback position · lookahead scheduling           │
-│  per-device latency offsets · fixed-rate DMX · drift correction       │
-└───────────────────────────────────────────────────────────────────────┘
-```
+This layering is the architecture. Exact class names, module layout, schemas,
+and algorithms remain future implementation choices unless
+[decisions.md](decisions.md) records otherwise.
 
-The synchronization layer is drawn last but is not "lowest" — it drives the
-render-and-transmit cycle and pulls from the show timeline. It is placed at the
-bottom because it is the only component permitted to read a clock.
+## Why FFT bins do not map directly to RGB
 
-## 3.1 Audio analysis layer
+A direct FFT-to-RGB mapping couples capture settings, sample rate, FFT size,
+room response, and device channels into one fragile function. It also makes
+several desired behaviors difficult or impossible:
 
-**Responsibilities.** Decode common audio formats. Normalize sample rate,
-channel count, and sample representation to one canonical signal. Detect beats,
-downbeats, onsets, energy, frequency-band energy, tempo, sections, and silence.
-Assign a confidence value to every detected event class. Cache results keyed by
-audio-file hash. Produce a deterministic `AudioFeatureTimeline`.
+- smoothing a musical transition without blurring every pixel calculation;
+- coordinating WLED and DMX fixtures around the same intent;
+- enforcing laser, strobe, intensity, and atmosphere policy before output;
+- preserving a recognizable style across different rigs;
+- comparing a LedFx scene with a native effect at the same semantic boundary;
+- replaying one capture deterministically through changed estimators or
+  renderers.
 
-**Explicitly not its responsibility.** Anything about lighting. This layer must
-never import a fixture, transport, or cue type.
-
-**Repository fit.** This layer is entirely new. The nearest existing thing is
-`frontend/js/home.js`, which is realtime, browser-side, and produces a single
-untyped trigger. It is not a precursor — it is a different mechanism for a
-different purpose, and PD-6 proposes keeping it as the live-performance fallback
-rather than replacing it.
-
-One artifact from the deleted AI system is worth noting because it will be
-misread otherwise: `backend/models/ai_mode_state.py:42-58` defines
-`AudioFeaturesRequest` with `frequency_bands`, `beat_features`,
-`spectral_centroid`, and `energy`. That model is orphaned (its routes fail to
-import, F20), it is a *realtime, per-tick* request shape, and it is **not** a
-timeline. It should not be reused as the artifact schema, though the choice of
-features it lists is reasonable evidence of what the creator wanted.
-
-## 3.2 Show-generation layer
-
-**Responsibilities.** Convert an `AudioFeatureTimeline` into semantic lighting
-cues. Support generated cues and manually authored or edited cues in the same
-timeline. Resolve conflicts by cue priority. Regenerate deterministically.
-Support styles, intensity profiles, and fixture groups.
-
-**The rule that gives this layer its value:** a cue says *what should happen*,
-never *which channel*. `Cue(action="strobe", target=group("bars"), …)` is
-correct. `Cue(channel=14, value=255)` is a layering violation and must fail
-review.
-
-**Repository fit.** Lights already has a curated-scene model — device preset →
-combined preset → scene → full scene — and that model is its most valuable
-asset (D-1). The show generator should **target the existing scene vocabulary
-first**, emitting cues that select and modulate existing presets and scenes,
-before it attempts to author fixture actions from nothing. This keeps the
-operator's curation in the loop and makes the first generator far smaller.
-
-## 3.3 Fixture-definition layer
-
-**Responsibilities.** Define manufacturers, models, modes, channels, and
-capabilities as *data*. Represent WLED devices and DMX fixtures under one
-consistent instance model. Support instances with base addresses, universes,
-and group membership. Validate address collisions and universe boundaries.
-**Fail closed for unknown fixture modes.**
-
-**Repository fit.** This directly supersedes F19. Today, fixture knowledge is
-hardcoded in `backend/routes/data.py:57-125` (bootstrapping `gigbar`, `keobin`,
-`haze` with fixed channel counts) and in `frontend/js/device_presets.js`, which
-carries a `MODE_VALUES` table mapping named modes to channel numbers for
-`gigbar` sub-devices (`par_1`, `par_2`, `derby_1`, `derby_2`, `laser`, `strobe`)
-and `keobin` sub-devices (four lasers, a magic ball, a strobe block).
-
-That table is the repository's only existing fixture-profile data, and it is the
-natural migration source for M10. It is also **unverified against any
-manufacturer manual**, which is why
-[fixture_and_transport_strategy.md](fixture_and_transport_strategy.md) requires
-manual-based re-derivation rather than a mechanical copy.
-
-## 3.4 Rendering layer
-
-**Responsibilities.** Translate semantic cue actions into WLED state changes,
-WLED realtime pixel frames, and DMX channel values. Isolate fixture-specific
-behavior. Make renderers reusable by capability.
-
-A renderer is a pure function. Given a capability, a value, and a fixture mode,
-it returns channel assignments. It reads no clock, opens no socket, and touches
-no disk. This is what makes fixture conformance testing (golden channel frames)
-possible at all.
-
-## 3.5 Transport layer
-
-**Responsibilities.** Send WLED JSON, WLED WebSocket, and WLED realtime
-UDP/DDP output. Send DMX via Art-Net, sACN, or an OLA-backed adapter. Provide
-mock and recording transports. Support blackout and safe shutdown. Expose
-latency-compensation configuration.
-
-**Do not force one interface across all of them.** This repeats a constraint
-already recorded in [architecture.md](architecture.md) Part 3, and it matters
-more here, not less: WLED state control, WLED pixel streaming, and DMX universe
-transmission have genuinely different shapes — request/response, continuous
-frame stream, and fixed-rate universe frame respectively. Share only the
-lifecycle concepts that are actually shared: `open`, `close`, `blackout`,
-`is_connected`, and a latency offset.
-
-**Repository fit.** The one existing precursor is
-`backend/ilda/sink.py` — `PointSink` / `NullSink` / `LoggingSink`. That is
-exactly the shape wanted, and it should be the pattern the DMX and WLED
-transports copy. DMX and LedFx currently have no injectable seam at all, which
-is M2's job.
-
-## 3.6 Timeline and synchronization layer
-
-**Responsibilities.** Own a monotonic high-resolution clock. Make audio playback
-position the authoritative show time. Schedule with lookahead rather than
-reacting at the timestamp. Compensate per-device latency. Run WLED and DMX at
-their own appropriate rates. Detect and correct drift.
-
-```text
-                     ┌──────────────────────────────┐
-                     │  PLAYBACK CLOCK (monotonic)  │
-                     │  show_time = audio position  │
-                     └───────────────┬──────────────┘
-                                     │
-              ┌──────────────────────┼──────────────────────┐
-              │                      │                      │
-     ┌────────▼────────┐   ┌─────────▼─────────┐  ┌─────────▼─────────┐
-     │ LOOKAHEAD       │   │ DMX RENDER TICK   │  │ WLED PIXEL TICK   │
-     │ SCHEDULER       │   │ fixed rate        │  │ own rate          │
-     │ horizon: H ms   │   │ (OQ-6: ~50 Hz?)   │  │                   │
-     │ priority queue  │   │ full 512 frame    │  │ frame per device  │
-     └────────┬────────┘   └─────────┬─────────┘  └─────────┬─────────┘
-              │                      │                      │
-              │  dispatch at         │                      │
-              │  cue.t − latency[d]  │                      │
-              └──────────────────────┴──────────────────────┘
-```
-
-**Repository fit and prerequisite.** This layer cannot be built on the current
-DMX path. F4 (unpaced loop), F5 (per-iteration disk read), and F6 (persistence
-as IPC) each independently defeat it. M5 is a hard prerequisite. OQ-6 — the
-target DMX refresh rate — is an open question that a native-Windows measurement
-must answer, and DESIGN INTENT already suggests roughly 20 ms / 50 Hz.
-
-## 3.7 Interface sketches
-
-PROPOSED. Illustrative Python, matching the repository's existing Pydantic
-idiom. Field sets are indicative, not settled.
-
-```python
-# --- Audio analysis output -------------------------------------------------
-class AudioFeatureTimeline(BaseModel):
-    schema_version: int
-    audio_sha256: str            # cache key, part 1
-    extractor_version: str       # cache key, part 2
-    analysis_config_hash: str    # cache key, part 3
-    duration_seconds: float
-    sample_rate: int
-
-    tempo_bpm: float | None
-    tempo_confidence: float       # 0.0–1.0
-
-    beats:     list[TimedEvent]   # t, strength, confidence
-    downbeats: list[TimedEvent]
-    onsets:    list[TimedEvent]
-    sections:  list[Section]      # t_start, t_end, label, confidence
-    silence:   list[Span]
-
-    bands:    BandEnergySeries    # fixed hop; named bands, not bin indices
-    loudness: Series
-    spectral_centroid: Series
-
-    overrides: ManualCorrections  # kept SEPARATE from generated values
-
-
-# --- Show generation output ------------------------------------------------
-class Cue(BaseModel):
-    id: str
-    t: float                      # show time, seconds
-    duration: float | None
-    target: TargetRef             # a fixture group or instance — never a channel
-    action: CapabilityAction      # dimmer, color, strobe, pattern, haze_burst…
-    params: dict[str, float | str]
-    priority: int                 # higher wins on overlap
-    source: Literal["generated", "manual"]
-    generator_version: str | None
-
-
-class ShowTimeline(BaseModel):
-    schema_version: int
-    audio_sha256: str
-    generator_version: str
-    style: str
-    cues: list[Cue]               # sorted by (t, priority)
-
-
-# --- Transports ------------------------------------------------------------
-class DmxTransport(Protocol):
-    def send_universe(self, universe: int, data: bytes) -> None: ...
-    def blackout(self) -> None: ...
-    def close(self) -> None: ...
-
-class WledStateTransport(Protocol):     # JSON / WebSocket control
-    def apply_state(self, device_id: str, state: WledState) -> None: ...
-    def blackout(self) -> None: ...
-
-class WledPixelTransport(Protocol):     # realtime UDP / DDP — separate on purpose
-    def send_frame(self, device_id: str, pixels: bytes) -> None: ...
-```
-
-Note what is absent from `Cue`: universe, address, channel, and DMX value. If
-any of those appear, the semantic boundary has been broken.
+Frequency information is evidence about the music. It is not itself a lighting
+command.
 
 ---
 
-# Part 4 — Current state versus future state
+# Part 4 — Audio-source and feature boundaries
 
-Every major capability, with its honest label. This table is the answer to
-"is this built yet?" for the whole show-control programme.
+## Future audio-source abstraction
 
-| Capability | State | Label |
-| --- | --- | --- |
-| DMX output, one universe, unicast sACN | Exists | VERIFIED CURRENT BEHAVIOR |
-| DMX output verified against physical fixtures | No repository evidence | UNKNOWN / not HARDWARE VERIFIED |
-| Multi-universe DMX | Does not exist — one `activate_output` call | VERIFIED CURRENT BEHAVIOR |
-| Art-Net output | Does not exist | PROPOSED |
-| OLA-backed output | Does not exist | PROPOSED |
-| Mock / recording DMX transport | Does not exist for DMX; the ILDA `PointSink`/`NullSink` seam is the only precedent | VERIFIED CURRENT BEHAVIOR (of the ILDA seam) |
-| Fixture patch model (universe + start address) | Does not exist; addressing is positional concatenation | VERIFIED CURRENT BEHAVIOR |
-| Address-collision validation | Not possible today — there are no addresses | VERIFIED CURRENT BEHAVIOR |
-| Fixture profiles as data | Does not exist; hardcoded in backend and frontend (F19) | VERIFIED CURRENT BEHAVIOR |
-| Capability-based fixture model | Does not exist | PROPOSED |
-| WLED direct control (JSON API) | Does not exist | PROPOSED |
-| WLED WebSocket | Does not exist | PROPOSED |
-| WLED realtime pixel output (UDP/DDP) | Does not exist | PROPOSED |
-| LedFx scene activation by name | Exists; host/port coupling defect (F17) | VERIFIED CURRENT BEHAVIOR |
-| Audio file input | **Does not exist anywhere in the repository** | PROPOSED |
-| Audio decoding / normalization | Does not exist | PROPOSED |
-| Offline feature extraction | Does not exist | PROPOSED |
-| Cached feature artifact | Does not exist | PROPOSED |
-| Live microphone onset detection | Exists, browser-side, untyped single trigger | VERIFIED CURRENT BEHAVIOR |
-| Tempo / downbeat / section detection | Does not exist | PROPOSED |
-| Semantic cue model | Does not exist | PROPOSED |
-| Show generation from audio | Does not exist | PROPOSED |
-| Manual timeline editing | Does not exist | PROPOSED |
-| Monotonic playback clock / show time | Does not exist | PROPOSED |
-| Lookahead scheduling | Does not exist | PROPOSED |
-| Per-device latency compensation | Does not exist | PROPOSED |
-| Fixed-rate DMX rendering | Does not exist; loop is unpaced (F4) | VERIFIED CURRENT BEHAVIOR |
-| Full-song hardware-free simulation | Does not exist | PROPOSED |
-| Fixture conformance tests | Does not exist; no test suite at all (F10) | VERIFIED CURRENT BEHAVIOR |
-| Laser DAC output | Does not exist — `LoggingSink` only (F22) | VERIFIED CURRENT BEHAVIOR |
-| Laser safety architecture | Does not exist | PROPOSED — see [laser_and_haze_safety.md](laser_and_haze_safety.md) |
-| Haze duty-cycle control | Does not exist; `haze` is a 2-channel manual device | VERIFIED CURRENT BEHAVIOR |
-| Runtime state in memory | Does not exist; `devices.json` is the bus (F6) | VERIFIED CURRENT BEHAVIOR |
-| Preflight validation | Does not exist | TARGET ARCHITECTURE |
-| Waveform / cue visualization | Does not exist | PROPOSED |
+The source boundary is source-independent. Candidate implementations include:
 
-**Partially implemented, and the distinction matters.** Three items are neither
-"exists" nor "absent":
+- WASAPI loopback on supported Windows hosts, or the equivalent supported
+  system-audio capture mechanism on another platform;
+- microphone input;
+- audio-file playback or decoding;
+- deterministic synthetic signals;
+- recorded capture replay.
 
-- **Audio reactivity** is implemented *as a live trigger* and absent *as an
-  analysis pipeline*. Saying "Lights has audio reactivity" is true in a way that
-  will mislead every reader of this roadmap. Say which one.
-- **Output adapters** exist for ILDA and only ILDA. The pattern is proven in
-  this codebase; it just has not been applied to DMX or LedFx.
-- **Validation on read** exists via Pydantic `TypeAdapter`
-  (`backend/models/storage.py:14`). What is missing is range validation (F11),
-  reference validation, and any validation of fixture semantics.
+The interface must expose timestamped audio or feature-ready chunks plus
+source health and discontinuity information. It must not permanently bind the
+architecture to WASAPI, a browser API, or any single operating system.
+Platform-specific capture remains behind the boundary.
+
+## Normalized feature stream
+
+The intended conceptual vocabulary includes:
+
+- timestamp;
+- RMS or relative loudness;
+- bass, mid, and treble energy;
+- spectral centroid or brightness;
+- spectral flux or onset strength;
+- beat probability;
+- estimated tempo;
+- beat phase;
+- confidence.
+
+Additional named bands or descriptors may be justified by measured renderer
+needs. Raw FFT-bin indexes are not a stable public vocabulary. Exact field
+names, units, sample windows, normalization rules, and algorithms are unresolved
+implementation decisions and must be versioned when defined.
+
+Live processing produces feature frames continuously. Offline analysis may
+produce a cached timeline, but each point on that timeline must be expressible
+in the same vocabulary so the next stage is source-agnostic.
 
 ---
 
-# Part 5 — Dependencies, assumptions, and unknowns
+# Part 5 — Live musical-state estimation and transitions
 
-## Hard prerequisite chain
+## Stabilized runtime states
 
-No show-control work should begin before the stabilization milestones it
-depends on. The dependency is real, not procedural:
+Candidate live estimates are:
+
+- `quiet`;
+- `groove`;
+- `building`;
+- `peak`;
+- `breakdown`;
+- `transition`;
+- `unknown`.
+
+These names describe an evolving runtime belief, not definitive offline song
+sections such as verse or chorus. A live analyzer can infer that energy is
+building without claiming knowledge of what the future track structure will
+be.
+
+The estimator requires smoothing, hysteresis, confidence thresholds, minimum
+residence times where useful, and explicit transition handling. Without those
+controls, momentary noise or one uncertain frame would cause unstable effect
+switching. Low confidence should prefer `unknown`, hold a safe prior state, or
+degrade to restrained cues rather than invent certainty.
+
+## Track-transition detection
+
+Transition evidence may include:
+
+- sustained silence;
+- pause or playback stop;
+- abrupt tempo shift;
+- abrupt loudness or spectral change;
+- a manual skip signal;
+- a metadata-reported track change, when available.
+
+No one signal is universally authoritative. Metadata can strengthen a
+transition decision but is optional; captured audio remains the runtime truth.
+
+The estimator may need to reset or gradually re-seed:
+
+- tempo history;
+- beat phase;
+- bar counter;
+- rolling normalization;
+- effect progression.
+
+Transitions should normally fade, hold, or move through a restrained
+`transition` state instead of hard-resetting every device. A pause or loss of
+input follows the configured safe loss-of-signal policy, not an arbitrary last
+frame.
+
+---
+
+# Part 6 — Semantic cue boundary
+
+Semantic cues describe visual or operational intent without physical channel
+values. Representative outputs include:
+
+- pulse wash fixtures;
+- trigger a pixel chase;
+- advance or shift a palette;
+- accent bars;
+- raise scene intensity;
+- trigger a drop burst;
+- hold or inhibit laser output;
+- adjust atmosphere within safety limits.
+
+A semantic cue may name a fixture group, capability, intensity, duration,
+priority, or transition shape. It does not name “DMX channel 14” or value 255.
+Universe, start address, protocol packet, WLED endpoint, and fixture-specific
+range lookup belong below this boundary.
+
+Safety gates are not cue priorities. A high-priority cue cannot open the laser
+gate, exceed a strobe limit, bypass an intensity ceiling, or defeat an
+atmosphere rate limit.
+
+---
+
+# Part 7 — Incremental LedFx and native-renderer migration
+
+LedFx is the compatibility path, not an obstacle to remove immediately:
 
 ```text
-M1 safe import ──► M2 test seams ──► Phase 1 (schemas + simulation)
-                        │
-                        └──► M5 runtime state + pacing ──► Phase 5 (sync)
-M3 atomic storage ──────────────────► Phase 3 (artifact caching)
-M8 validation/preflight ────────────► Phase 4 (lasers, haze)
-M9 security ────────────────────────► Phase 4 (laser gating)
+Current LedFx integration
+        ↓
+Custom real-time analyzer and semantic cue engine
+        ↓
+├── LedFx adapter for existing WLED scenes
+├── Native WLED renderer for new pixel effects
+└── DMX renderer for physical fixtures
 ```
 
-Concretely:
+Lights first gains ownership of audio normalization, musical state, and
+semantic cues. Existing WLED scenes can continue through an injectable LedFx
+adapter while native output grows beside it. LedFx remains available until
+native effects are demonstrably reliable on supported hardware and parity has
+been evaluated for the scenes operators rely on.
 
-- **Phase 1 needs M2.** Without an injectable transport there is nothing to
-  record, so full-song simulation cannot exist.
-- **Phase 3 needs M3.** A feature-artifact cache written non-atomically will
-  eventually hand a truncated artifact to a show generator, and F8 means the
-  reader will report it as "empty" rather than "corrupt".
-- **Phase 5 needs M5.** Synchronization on top of a disk-polling control bus
-  measures disk behavior, not timing.
-- **Any laser work needs M8 and M9**, and the full policy in
-  [laser_and_haze_safety.md](laser_and_haze_safety.md).
+Ownership of each WLED device must be unambiguous at runtime. LedFx and the
+native renderer must not concurrently fight for the same device.
 
-## Assumptions this architecture makes
+## Native WLED modes
 
-Stated so they can be challenged rather than silently inherited.
+Two future output modes are distinct:
 
-1. **One operator, one rig, one venue at a time.** No multi-user editing, no
-   concurrent shows, no networked console synchronization.
-2. **Audio is supplied as complete files before the show**, not streamed from a
-   DJ deck in realtime. Live-input operation continues to use the existing
-   microphone path (PD-6).
-3. **The Python runtime stays.** The repository is Python/FastAPI end to end;
-   there is no TypeScript and no frontend build step. Recommendations that
-   assume a Node or TypeScript runtime are documented but are **not applicable
-   to this repository** as it stands — see
-   [show_control_recommendations.md](show_control_recommendations.md).
-4. **Show playback is centralized in the backend.** The browser remains a
-   control surface, not a scheduler.
-5. **Determinism is worth more than sophistication.** A simpler generator whose
-   output can be diffed and regression-tested beats a better-sounding one that
-   cannot.
+1. **State-oriented control** for power, presets, brightness, segments, colors,
+   palettes, and other lower-rate changes.
+2. **Realtime pixel streaming** for custom per-pixel effects at a render-frame
+   rate.
 
-## Known unknowns
+Realtime streaming likely uses a supported protocol such as DDP, but DDP is not
+an architectural commitment. Transport selection must be validated against the
+actual WLED firmware, hardware, pixel count, network, and measured performance.
+Pixel frames must not be tunneled through the lower-rate state path.
 
-These are genuine gaps, recorded so no one has to rediscover them.
+## Fixture-aware DMX rendering
 
-| Unknown | Why it matters | Where it is tracked |
-| --- | --- | --- |
-| Exact channel layouts for every fixture and mode | Nothing may be output without a manual-verified profile | [fixture_and_transport_strategy.md](fixture_and_transport_strategy.md), PD-3 |
-| Whether the existing `MODE_VALUES` table is correct | It is the only fixture data in the repository and is unverified | F19, PD-3 |
-| Target DMX refresh rate | Drives the whole synchronization design | OQ-6 |
-| Whether audio playback happens in the browser or the backend | Determines where authoritative show time lives | PD-7 |
-| Per-device latency values | Cannot be derived; must be measured on the rig | Phase 5 |
-| Whether WLED is addressed directly or only through LedFx | Determines whether realtime pixel output is even reachable | PD-8 |
-| Licensing of several candidate libraries | Affects whether a packaged executable may be distributed | [show_control_recommendations.md](show_control_recommendations.md) |
-| Whether the operator wants generated shows at all, versus better tools for authoring them by hand | Would reorder Phases 3 and 5 entirely | PD-10 |
+The future DMX loop runs at a fixed rate and:
 
-The last one is not rhetorical. This entire programme assumes generated shows
-are wanted. If the real need is a better manual authoring surface with audio
-alignment, the audio-analysis layer is still required but the show-generation
-layer shrinks to almost nothing.
+1. reads the latest normalized state and active semantic effects;
+2. evaluates effects for the current tick;
+3. resolves target fixtures, layers, and priorities;
+4. builds a complete frame for each configured universe;
+5. applies safety policy and safe values;
+6. sends through an injectable real, null, or recording transport.
+
+The renderer is latest-state-wins. It does not replay a backlog of stale
+intermediate states.
+
+Fixture instances require explicit universe and 1-based start-address
+configuration. Complete frames are built by placing validated fixture output at
+those addresses, not by positional channel concatenation. PARs, bars, and
+multi-effect fixtures are rendered by declared capabilities and exact,
+manual-sourced fixture modes. Unknown modes and unsafe profiles fail closed as
+specified in [fixture_and_transport_strategy.md](fixture_and_transport_strategy.md).
+
+---
+
+# Part 8 — Safety boundary
+
+The renderer and runtime require explicit policy controls for:
+
+- emergency blackout that is independent of cue evaluation;
+- laser master enable, off on every start and requiring deliberate operator
+  confirmation;
+- strobe-rate and exposure limits;
+- global and per-fixture intensity ceilings;
+- haze or atmosphere duty-cycle, minimum-off, and rate limits;
+- manual override with defined precedence;
+- freeze or hold behavior that distinguishes creative hold from emergency
+  blackout;
+- safe loss-of-signal behavior for missing audio, renderer failure, transport
+  failure, and disconnect.
+
+The detailed laser and haze requirements are normative in
+[laser_and_haze_safety.md](laser_and_haze_safety.md). Software policy reduces
+ways the application can command unintended output; it does not guarantee
+legal compliance or venue safety and does not replace physical interlocks,
+appropriate emergency stops, correct installation, or a trained operator.
+
+---
+
+# Part 9 — Scheduling and latency budgets
+
+The following are initial, nonbinding engineering budgets:
+
+| Stage | Initial target |
+| --- | --- |
+| Audio chunks | approximately 10–20 ms |
+| Feature updates | approximately 50–100 Hz |
+| Musical-state updates | approximately 20–50 Hz |
+| Native WLED rendering | approximately 30–60 frames per second |
+| DMX output | approximately 30–44 frames per second |
+| Capture-to-visible response | under approximately 80 ms end to end |
+
+These are not guarantees, supported-hardware claims, or fixed constants. They
+must be measured on actual supported hardware, including the Windows show host,
+WLED devices, DMX node, fixture response, and real network.
+
+Inter-stage handoffs use bounded latest-state-wins queues. If processing misses
+a deadline, stale feature or render frames are skipped rather than accumulated.
+The runtime must expose dropped-frame counts and latency measurements so budget
+violations can be diagnosed instead of hidden.
+
+---
+
+# Part 10 — Deterministic testing and replay
+
+Replay is the primary regression strategy for the live system:
+
+```text
+Captured audio or synthetic signal
+        ↓
+Feature-frame log
+        ↓
+Musical-state log
+        ↓
+Semantic cue log
+        ↓
+WLED frame log and DMX universe log
+```
+
+Each boundary is recordable and replayable. Tests can therefore distinguish an
+audio-normalization change from a state-estimation change, a cue-policy change,
+or a fixture-rendering change.
+
+The planned fixture corpus includes:
+
+- click tracks;
+- constant tempo;
+- tempo changes;
+- silence;
+- bass-heavy material;
+- bright or treble-heavy material;
+- noisy microphone input;
+- abrupt skips;
+- quiet-to-loud changes;
+- loss and recovery of audio input.
+
+Recorded live capture and synthetic signals are first-class test inputs, not
+debug leftovers. Recording transports must capture WLED and complete DMX output
+without contacting physical devices. Simulation validates software behavior,
+not fixture profiles or hardware response; native-Windows rig validation
+remains separate under [platform_support.md](platform_support.md).
+
+---
+
+# Part 11 — Language and optimization strategy
+
+Python remains the primary implementation language for:
+
+- audio analysis;
+- cue orchestration;
+- scheduling;
+- fixture rendering;
+- transports;
+- backend integration.
+
+This matches the existing FastAPI/Pydantic application and keeps the first
+implementation within one runtime. Rust or C++ may be introduced behind a
+stable project-owned interface only after profiling on representative hardware
+demonstrates a bottleneck that cannot be resolved acceptably in Python. Native
+code is an optimization response, not an architectural starting assumption.
+
+---
+
+# Part 12 — Current state versus future direction
+
+| Capability | State |
+| --- | --- |
+| Browser microphone spectral-flux onset trigger | VERIFIED CURRENT BEHAVIOR |
+| System-audio loopback capture | TARGET ARCHITECTURE (D-14); not implemented |
+| Source-independent audio interface | TARGET ARCHITECTURE (D-14); not implemented |
+| Spotify metadata enhancement | Optional future capability; not implemented |
+| Spotify raw-audio ingestion | Not assumed or planned through metadata APIs |
+| Audio-file decoding and offline analysis | Optional future capability; not implemented |
+| Normalized shared feature vocabulary | TARGET ARCHITECTURE (D-15); schema unresolved and not implemented |
+| Stabilized live musical-state estimation | TARGET ARCHITECTURE; algorithms unresolved and not implemented |
+| Semantic cue model | TARGET ARCHITECTURE (D-16); not implemented |
+| LedFx scene activation | VERIFIED CURRENT BEHAVIOR, with known configuration and timeout defects |
+| LedFx compatibility adapter | TARGET ARCHITECTURE (D-17); injectable adapter not implemented |
+| Direct WLED state control | PROPOSED implementation; not present |
+| Native realtime WLED pixels | TARGET ARCHITECTURE (D-17); transport unresolved and not present |
+| One-universe positional sACN output | VERIFIED CURRENT BEHAVIOR |
+| Explicit fixture patch and fixed-rate DMX renderer | TARGET ARCHITECTURE; not implemented |
+| Laser, strobe, intensity, and atmosphere policy | TARGET ARCHITECTURE (D-20); controls not implemented |
+| Deterministic capture/replay and output logs | TARGET ARCHITECTURE (D-19); not implemented |
+
+## Unresolved implementation choices
+
+The architecture deliberately leaves these choices open until evidence exists:
+
+- exact live-capture APIs and where capture runs;
+- the normalized feature schema, units, windows, and algorithms;
+- state-estimation algorithms and thresholds;
+- Spotify metadata integration scope and authentication;
+- WLED realtime transport and supported firmware/hardware matrix;
+- measured queue sizes, rates, latency budgets, and overload behavior;
+- fixture-profile format and exact manual-verified channel definitions;
+- operator behavior for freeze, hold, and loss of signal within the required
+  safety policy.
+
+These choices may refine the implementation. They may not collapse the
+source-independent feature boundary, the semantic cue boundary, the
+fixture-aware rendering boundary, or the explicit safety gates.

@@ -1,7 +1,7 @@
 # Show-Control Recommendations
 
-**Status of this document:** PROPOSED. Established on branch
-`docs/lighting-audio-show-control-architecture` against HEAD `bc91b77`.
+**Status of this document:** PROPOSED option inventory. Updated on branch
+`docs/live-renderer-architecture`.
 
 Every entry is a recommendation, not a decision. Nothing here is adopted,
 installed, or implemented. Adopting any of them requires an owner decision, and
@@ -9,6 +9,29 @@ several require a licence review first.
 
 Read [show_control_architecture.md](show_control_architecture.md) for the layer
 model these recommendations sit inside.
+
+## Live-first interpretation
+
+The canonical architecture now makes live system-audio capture the primary
+party-mode source, with microphone fallback and optional offline analysis. Any
+older wording below that presents complete-file analysis, a playback timeline,
+or full-song generation as the primary mode is superseded by
+[show_control_architecture.md](show_control_architecture.md), decisions D-13
+through D-19, and Phases 3A–3C in
+[show_control_roadmap.md](show_control_roadmap.md).
+
+The library entries remain research candidates, not commitments. In particular:
+
+- no audio, WLED, DMX, or native-code dependency is adopted by this document;
+- a future source interface must not be locked permanently to WASAPI or another
+  operating-system API;
+- Python remains primary until profiling demonstrates a bottleneck;
+- DDP remains a candidate WLED pixel transport that requires hardware and
+  performance validation;
+- offline decoding, cached artifacts, and manual correction now belong to
+  optional Phase 3B;
+- deterministic live capture and boundary replay, rather than full-song file
+  simulation alone, is the primary regression strategy.
 
 ## How to read the impact ratings
 
@@ -66,7 +89,7 @@ choice it appears to be.
 | 20 | NumPy and SciPy | Audio | High | Yes |
 | 21 | Cached audio feature artifact | Audio | High | Yes |
 | 22 | Manual analysis correction | Audio | High | Yes |
-| 23 | Monotonic playback clock | Sync | **Transformative** | Yes |
+| 23 | Monotonic live time base / prepared playback clock | Sync | **Transformative** | Yes |
 | 24 | Lookahead scheduler | Sync | High | Yes |
 | 25 | Per-device latency compensation | Sync | High | Yes |
 | 26 | Fixed-rate DMX rendering | Sync | High | Yes |
@@ -74,7 +97,7 @@ choice it appears to be.
 | 28 | Pydantic (not Zod) | Schema | High | Yes — already a dependency |
 | 29 | XState or explicit state machines | App | Moderate | Partially — see entry |
 | 30 | Fixture conformance tests | Test | **Transformative** | Yes |
-| 31 | Full-song simulation | Test | High | Yes |
+| 31 | Deterministic capture and timeline replay | Test | High | Yes |
 | 32 | Universe collision validation | Test | High | Yes, after addressing exists |
 | 33 | Visual timeline and waveform diagnostics | Test / UX | High | Yes, machine-readable first |
 | 34 | Context7 | Agent tooling | Moderate | Yes |
@@ -373,8 +396,8 @@ precedent and should be the model.
 
 **Prerequisites.** M1, then M2. Nothing else.
 
-**Risks and licensing.** Recording files grow quickly at 50 Hz across a full
-track; needs a retention policy. Frames must be compared with a stable
+**Risks and licensing.** Recording files grow quickly at sustained render
+rates; they need a retention policy. Frames must be compared with a stable
 normalization so tests fail on real differences rather than on timing jitter.
 No licence concern — this is project code.
 
@@ -480,7 +503,7 @@ rather than by what they are called.
 
 **Why it is relevant here.** It is what allows the show engine to emit
 `strobe the bars` without knowing a channel number, and it is the mechanism
-behind the semantic boundary (PD-1). It also collapses the renderer count: one
+behind the semantic boundary (D-16). It also collapses the renderer count: one
 `dimmer` renderer serves every fixture that declares a dimmer.
 
 **How it would be implemented here.** A small, deliberately constrained
@@ -506,14 +529,39 @@ rigs.
 
 # 4. Audio processing
 
+## 4.0 Live source and analyzer boundary
+
+**What it does.** Captures system audio in real time, falls back to microphone,
+and normalizes both into the shared feature vocabulary in D-15.
+
+**Why it is relevant here.** This is the primary party-mode path. The original
+file is normally unavailable before unpredictable Spotify playback, so entries
+4.1–4.7 cannot be prerequisites for live operation.
+
+**How it would be implemented here.** A project-owned, source-independent
+interface with platform-specific loopback behind it. WASAPI is a Windows
+candidate, not an architectural commitment. The same boundary admits
+microphone, file, synthetic, and recorded-replay implementations. Feature and
+state handoffs are bounded and latest-state-wins.
+
+**Prerequisites.** M1/M2 lifecycle and test seams; the Phase 1 feature/replay
+schemas.
+
+**Risks and licensing.** Capture APIs, driver behavior, and latency are
+platform-specific. Select libraries only after a small supported-host
+prototype, dependency/license review, and actual latency measurement.
+
+**Expected improvement: Transformative.** It enables the primary use case
+without requiring track files.
+
 ## 4.1 FFmpeg
 
 **What it does.** Decodes and normalizes MP3, WAV, FLAC, AAC, M4A, and more into
 a consistent PCM representation.
 
-**Why it is relevant here.** It creates **one** decoding boundary. Every
-analyzer downstream then operates on an identical signal, which is a
-precondition for the determinism the whole pipeline depends on.
+**Why it is relevant here.** It is a candidate decoding boundary for optional
+prepared tracks, cached analysis, and file-based test fixtures. Every offline
+analyzer downstream can then operate on an identical signal.
 
 **How it would be implemented here.** Invoked as a **subprocess**, producing
 canonical mono float PCM at the project analysis sample rate, with applied gain
@@ -529,8 +577,9 @@ Licensing is LGPL or GPL **depending on how the binary was built**; invoking it
 as a separate process avoids linking concerns, but shipping a build inside the
 executable does not. **Resolve before packaging, not after.**
 
-**Expected improvement: High.** Major improvement in format coverage and in the
-reproducibility of everything downstream.
+**Expected improvement: High for optional Phase 3B.** Major improvement in file
+format coverage and offline reproducibility; no effect on whether live party
+mode can run.
 
 ## 4.2 Librosa
 
@@ -538,10 +587,9 @@ reproducibility of everything downstream.
 onsets, tempo, spectral features, loudness, chroma, harmonic/percussive
 separation.
 
-**Why it is relevant here.** It is the fastest path from "no audio pipeline at
-all" to a working offline analysis, and it covers most of the feature set in
-[audio_reactivity_architecture.md](audio_reactivity_architecture.md) Part 3.2 in
-one dependency.
+**Why it is relevant here.** It is a candidate for optional offline analysis
+and file-based reference extraction. It covers much of the shared feature
+vocabulary and can help compare live estimates with prepared-track results.
 
 **How it would be implemented here.** Versioned extractor functions, each
 deterministic and independently testable against fixed inputs, writing into the
@@ -558,8 +606,8 @@ Permissively licensed (ISC); **verify at adoption**. Brings a substantial
 scientific-Python dependency tree, which interacts with the packaged-executable
 size.
 
-**Expected improvement: Transformative for offline sound reactivity.** It is the
-single dependency that makes the audio-analysis layer exist.
+**Expected improvement: High for optional offline analysis.** It is not required
+for the live analyzer to exist.
 
 ## 4.3 Essentia
 
@@ -594,10 +642,10 @@ downbeat and structural accuracy, gated entirely on the licence question.
 **What it does.** A smaller audio-analysis toolkit for onset, pitch, tempo,
 beat, and spectral analysis, including realtime-capable operation.
 
-**Why it is relevant here.** Two possible roles: a lighter alternative to
-Librosa for the subset of features it covers, and a candidate for a
-**backend-side realtime** path if live audio analysis ever moves out of the
-browser.
+**Why it is relevant here.** Two possible roles: a lighter optional offline
+extractor for the subset of features it covers, and a candidate for the
+Python-side live analyzer. Its measured accuracy, latency, packaging impact,
+and license must be compared with other implementations rather than assumed.
 
 **How it would be implemented here.** Behind the extractor interface, evaluated
 against the same fixed-input tests as the Librosa extractors so the comparison
@@ -645,9 +693,9 @@ value.
 **What it does.** A versioned file holding beats, downbeats, onsets, loudness,
 band energy, tempo, sections, confidence, and metadata for one track.
 
-**Why it is relevant here.** Analysis is slow; shows are regenerated often. More
-importantly, the artifact is what makes generated shows **reproducible** —
-without it, "the same show" is not a well-defined thing.
+**Why it is relevant here.** Optional offline analysis may be slow and prepared
+shows may be regenerated often. A cached artifact makes known-track analysis
+reproducible without becoming a dependency of live party mode.
 
 **How it would be implemented here.** Keyed by **audio content hash + extractor
 version + analysis config hash** — all three. Stored under `LIGHTSAPP_DATA_DIR`
@@ -695,23 +743,24 @@ relied on for a specific set.
 
 # 5. Synchronization and scheduling
 
-## 5.1 Monotonic playback clock
+## 5.1 Monotonic live time base and prepared playback clock
 
-**What it does.** A high-resolution clock unaffected by wall-clock adjustments,
-with audio playback position as the authoritative show time.
+**What it does.** Provides a high-resolution monotonic time base for live
+capture, feature, state, cue, and render timestamps. In optional prepared mode,
+audio playback position may be authoritative show time.
 
 **Why it is relevant here.** **Show time does not currently exist as a concept.**
 Lighting state is a function of onset *count*, not of musical time
 ([audio_reactivity_architecture.md](audio_reactivity_architecture.md) Part 1).
 Every other synchronization recommendation presupposes this one.
 
-**How it would be implemented here.** One clock, owned by the synchronization
-layer, and the only component permitted to read time. All cues are compared
-against it. Drift between the clock and actual audio position is measured and
-corrected rather than accumulated.
+**How it would be implemented here.** One time base owned by the runtime. Live
+capture timestamps are authoritative for party mode. Prepared playback maps
+audio position onto that base, with drift measured and corrected rather than
+accumulated.
 
-**Prerequisites.** M5, and a decision on PD-7 (browser or backend playback) —
-that decision determines where the authoritative position is read from.
+**Prerequisites.** M5. PD-7's browser-versus-backend question remains relevant
+only to optional prepared playback, not to the live capture path.
 
 **Risks and licensing.** If playback is in the browser, position must cross the
 network and the transport latency becomes part of the timing budget. No licence
@@ -748,7 +797,7 @@ and haze machine.
 
 **Why it is relevant here.** These devices respond at genuinely different
 speeds, and haze differs by seconds to tens of seconds, not milliseconds
-([laser_and_haze_safety.md](laser_and_haze_safety.md) 3.6). Without
+([laser_and_haze_safety.md](laser_and_haze_safety.md) 4.6). Without
 compensation, "synchronized" means synchronized at the transport and visibly
 unsynchronized in the room.
 
@@ -772,8 +821,10 @@ frequency.
 
 **Why it is relevant here.** The current loop is **unpaced** (F4) and re-reads
 `devices.json` on every iteration (F5). It is not merely uneven — it is a busy
-loop whose iteration rate is determined by disk and CPU. DESIGN INTENT targets
-roughly 20 ms / 50 Hz.
+loop whose iteration rate is determined by disk and CPU. The live-renderer
+architecture begins with a nonbinding budget of approximately 30–44 FPS, while
+the earlier creator DESIGN INTENT recorded roughly 20 ms / 50 Hz. The default
+must be measured rather than selected from prose.
 
 **How it would be implemented here.** Render in-memory desired state into a
 512-byte universe buffer on a monotonic tick and transmit at a configured rate.
@@ -790,15 +841,14 @@ against the real rig (OQ-6). No licence concern.
 **Expected improvement: High.** Major improvement in output determinism, and it
 eliminates a continuous CPU and disk load.
 
-## 5.5 Audio timeline and semantic cue model
+## 5.5 Normalized features and semantic cue model
 
-**What it does.** Separates detected musical events from device-specific
-commands: `AudioFeatureTimeline`, `ShowTimeline`, and `Cue` as distinct typed
-schemas.
+**What it does.** Separates normalized live or offline musical evidence from
+musical-state estimates, semantic cues, and device-specific commands.
 
-**Why it is relevant here.** It is the semantic boundary (PD-1) expressed as
-types. It is what lets one analysis drive multiple rigs and multiple styles, and
-it is what makes the show generator testable without any fixture at all.
+**Why it is relevant here.** It expresses D-15 and D-16 as types. It lets live,
+offline, synthetic, and replay sources drive the same downstream logic and
+makes cue generation testable without a fixture.
 
 **How it would be implemented here.** Pydantic models, versioned, validated on
 read. **A `Cue` that contains a universe, address, channel, or DMX value is a
@@ -911,22 +961,24 @@ definition matches the *fixture*; only manual and rig verification does that.
 **Expected improvement: Transformative for reliability and safety.** It is the
 only automated defence against incorrect physical output.
 
-## 7.2 Full-song simulation
+## 7.2 Deterministic capture and timeline replay
 
-**What it does.** Runs a complete generated show with no hardware connected,
-recording every output frame.
+**What it does.** Replays recorded live capture, synthetic features, or an
+optional prepared timeline with no hardware connected, recording every
+downstream state, cue, and output frame.
 
-**Why it is relevant here.** It makes an entire show reviewable on WSL2, where
-D-2 and D-8 forbid hardware validation. Timing, transitions, output limits, and
-unsafe commands all become inspectable without a rig, and diffable between
-versions.
+**Why it is relevant here.** It makes live transitions and prepared shows
+reproducible on WSL2, where D-2 and D-8 forbid hardware validation. Timing,
+state changes, output limits, and unsafe commands become inspectable without a
+rig and diffable between versions.
 
-**How it would be implemented here.** Mock WLED transports plus the recording
-DMX transport (entry 11), driven by the real scheduler against a real artifact.
-The output is a frame log that tests assert over and the visualizer (entry 33)
-renders.
+**How it would be implemented here.** Boundary logs for normalized features,
+musical state, semantic cues, WLED frames, and DMX universes, using mock WLED
+and recording DMX transports. Tests can start from any boundary to isolate the
+stage that changed.
 
-**Prerequisites.** Entry 11, M2, and a working generator.
+**Prerequisites.** Entry 11, M2, the shared feature schema, and the relevant
+live or prepared cue path.
 
 **Risks and licensing.** Simulation validates the *software*, never the
 *hardware*. A show that simulates perfectly can still be wrong on the rig
@@ -934,7 +986,8 @@ because a profile is wrong — this must be stated wherever simulation results a
 reported, or "simulated" will be read as "verified". No licence concern.
 
 **Expected improvement: High.** Major reduction in the amount of work requiring
-the rig, and it makes generator changes reviewable.
+the rig, and it makes live analyzer, transition, cue, and renderer changes
+reviewable.
 
 ## 7.3 Universe collision validation
 
@@ -1105,8 +1158,8 @@ Six project-specific skills. Each is PROPOSED; none exists.
 - **Outputs:** a `ShowTimeline`, plus a diff against the previous generation for
   the same inputs.
 - **Safety checks:** rejects any cue containing a universe, address, channel, or
-  DMX value (the PD-1 boundary); rejects any style mapping haze to beat- or
-  onset-level features (PD-9); rejects laser cues where the gate is not
+  DMX value (the D-16 boundary); rejects any style mapping haze to beat- or
+  onset-level features (D-20); rejects laser cues where the gate is not
   modelled.
 - **Validations:** regeneration is byte-identical; manual cues survive;
   conflicts resolve deterministically.
@@ -1188,8 +1241,8 @@ output-affecting work.
         │             │                                         │
         ▼             ▼                                         │
  ┌──────────────┐ ┌──────────────┐                              │
- │ 31 full-song │ │ 30 conform-  │                              │
- │ simulation   │ │ ance tests   │                              │
+ │ 31 capture / │ │ 30 conform-  │                              │
+ │ timeline     │ │ ance tests   │                              │
  └──────┬───────┘ └──────────────┘                              │
         │                                                       │
         ▼                                                       │
@@ -1208,11 +1261,13 @@ output-affecting work.
   M7 LedFx decoupling ──► 1 WLED JSON ──► 2 WebSocket
                                      └──► 3 realtime pixels (needs 23, 26)
 
-  M8 preflight + M9 auth + laser gate (PD-4) ──► laser capabilities in 14/15
+  M8 preflight + M9 auth + laser gate (D-20) ──► laser capabilities in 14/15
 ```
 
-Three chains carry almost all the value, and they are largely independent:
-**11 → 30/31/32/33** (testing), **14 → 15** (fixtures), and
-**16 → 17 → 21 → 27** (audio). The synchronization chain (23–26) depends on M5
-and gates the realtime WLED work. Starting all four at once is the main
-sequencing risk; entry 11 is the cheapest and unblocks the most.
+Three chains carry most of the value and are largely independent:
+**11 → 30/31/32/33** (testing and replay), **14 → 15** (fixtures), and
+**4.0 → 27** (live audio to semantic cues). The
+**16 → 17 → 21** chain is optional Phase 3B offline analysis. The
+synchronization chain (23–26) depends on M5 and gates realtime WLED work.
+Starting all of them at once is the main sequencing risk; entry 11 is still the
+cheapest and unblocks the most.

@@ -11,6 +11,27 @@ All findings below are **VERIFIED CURRENT BEHAVIOR** unless a finding says
 otherwise. Findings are numbered `F1`–`F25` for stable cross-reference; the
 numbers carry no priority meaning beyond the section they sit in.
 
+## Live-renderer documentation re-check
+
+The `docs/live-renderer-architecture` pass re-inspected the relevant current
+audio, LedFx, WLED, DMX, configuration, and fixture code without importing
+`backend/main.py`. Production code remained unchanged from base HEAD `a33ecb3`.
+The re-check confirmed:
+
+- the supported audio path is still browser microphone spectral-flux onset
+  detection and preset advancement;
+- the AI feature page remains orphaned because its backend package is absent;
+- no system-audio loopback, source abstraction, normalized analyzer, musical-
+  state estimator, or replay harness exists;
+- WLED remains reachable only indirectly through LedFx scene activation;
+- no native WLED state or pixel renderer exists;
+- DMX remains one positional, disk-polled, unpaced sACN universe;
+- no fixture-aware renderer or new safety policy implementation exists.
+
+These absences are not new defects added to the F-series; they are the verified
+current-state boundary for the approved future architecture. Do not describe
+any live-renderer component as implemented.
+
 Priorities describe *sequencing*, not severity of consequence. P0 findings are
 startup, data-integrity, and safety concerns that block confident work on
 everything else. P1 findings are serious but sit behind P0 in dependency order.

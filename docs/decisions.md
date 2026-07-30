@@ -93,16 +93,17 @@ No HARDWARE VERIFIED claim may originate from a WSL2 result. See
 Windows firewall make its results non-transferable for exactly the behaviors
 that matter for a lighting rig.
 
-### D-9 — Browser-side audio analysis is kept
+### D-9 — The existing browser microphone path is preserved during migration
 
-Microphone capture and beat detection stay in the browser; the backend receives
-derived beat events.
+The current microphone capture and onset detector are not removed merely to
+begin the live-renderer migration. They remain available until the replacement
+source boundary and microphone fallback are working and verified.
 
-*Why:* raw audio never crosses a process boundary and the backend stays free of
-an audio pipeline — both structural properties readable from the code. Whether
-the browser microphone capture and beat detection actually work in the host
-browser is CODE-INSPECTED ONLY and remains unverified; it is a row on the
-native-Windows checklist in [platform_support.md](platform_support.md).
+*Why:* it is the only supported audio-reactive path that currently exists, and
+incremental stabilization remains binding under D-1. Its browser placement,
+raw-FFT vocabulary, and per-onset HTTP advancement are not binding on the
+future analyzer. D-13 and D-14 supersede D-9 only where it previously implied
+that browser microphone analysis was the permanent primary architecture.
 
 ### D-10 — Evidence labels are mandatory
 
@@ -132,17 +133,136 @@ Narrowly scoped to M1. See [current_sprint.md](current_sprint.md).
 narrow first branch establishes the review pattern for the milestones that
 follow.
 
+### D-13 — Party mode is live-first
+
+Unpredictable, continuously changing Spotify playback is the primary use case.
+Live audio capture is the runtime source of truth. Spotify metadata is an
+optional identity and track-change enhancement, and offline analysis is an
+optional prepared-track capability.
+
+*Why:* Lights usually will not possess the original audio file before playback,
+and a queue entry may change or be skipped without warning. Requiring complete-
+file analysis would make ordinary party mode unavailable precisely when it is
+most needed. Spotify metadata does not replace the program signal, and this
+decision does not assume metadata APIs expose arbitrary raw audio.
+
+*Supersedes:* PD-6's ordering of offline analysis as primary and microphone as
+fallback. It does not reject offline analysis; it changes its role.
+
+### D-14 — System-audio loopback is preferred over microphone for party mode
+
+The future source boundary prefers real-time system-audio loopback on supported
+show hosts. Microphone capture is the fallback. Platform-specific mechanisms
+such as WASAPI remain implementations behind a source-independent interface,
+not permanent architectural dependencies.
+
+*Why:* loopback observes the program signal without crowd noise, room
+reflections, or microphone placement. A microphone is still necessary when
+loopback is unavailable or inappropriate. The source abstraction also supports
+decoded files, deterministic signals, and recorded replay.
+
+### D-15 — Live and offline analysis share one normalized feature vocabulary
+
+System loopback, microphone, audio files, deterministic signals, and recorded
+replay produce compatible timestamped feature frames. The conceptual
+vocabulary includes relative loudness, named frequency-band energy,
+brightness, onset strength, beat probability, tempo, beat phase, and
+confidence.
+
+*Why:* musical-state estimation and cue generation should not branch on the
+source. A shared vocabulary makes live and prepared modes comparable and lets
+recorded captures test the same downstream pipeline. Exact schemas, units,
+windows, and algorithms remain future versioned implementation decisions.
+
+### D-16 — Semantic cues are separate from physical channel values
+
+Musical interpretation emits intent such as pulse washes, trigger a pixel
+chase, accent bars, raise intensity, inhibit laser output, or adjust atmosphere
+within policy. Universe, address, channel, DMX value, WLED packet, and LedFx
+payload appear only below the fixture-rendering boundary.
+
+*Why:* the boundary lets one analyzer coordinate LedFx, native WLED, and DMX;
+lets fixture profiles change without rewriting musical logic; and provides a
+single point for safety policy before physical output. Mapping an FFT bin
+directly to a channel would collapse these properties.
+
+*Accepts:* PD-1.
+
+### D-17 — Native rendering is incremental and LedFx remains a compatibility adapter
+
+Lights develops a custom live analyzer, semantic cue engine, native WLED
+renderer, and fixture-aware DMX renderer incrementally. LedFx remains available
+for existing WLED scenes until native rendering is demonstrably reliable and
+parity has been evaluated.
+
+State-oriented WLED control and realtime pixel streaming remain separate
+responsibilities. DDP is a candidate realtime transport, not a locked
+architecture choice; the transport must be validated against supported
+hardware and performance.
+
+*Why:* immediate LedFx removal would discard working scene behavior before its
+replacement is proven. Explicit per-device ownership prevents LedFx and native
+output from fighting for the same WLED device.
+
+*Accepts and refines:* PD-8.
+
+### D-18 — The live renderer is Python-first
+
+Python is the primary language for audio analysis, cue orchestration,
+scheduling, fixture rendering, transports, and backend integration. Rust or C++
+may be introduced only behind a stable project-owned interface after profiling
+on representative hardware demonstrates a bottleneck.
+
+*Why:* the repository already uses Python, FastAPI, and Pydantic. A second
+runtime would add packaging, testing, and integration cost before evidence
+shows it is necessary. Profile-driven native optimization preserves the option
+without pre-optimizing the architecture.
+
+### D-19 — Deterministic capture and replay is the primary regression mechanism
+
+The live pipeline is recordable at the audio/feature, musical-state, semantic
+cue, WLED frame, and DMX universe boundaries. Recorded capture and deterministic
+synthetic signals are first-class test inputs. Null and recording transports
+must prevent physical output during regression tests.
+
+*Why:* live audio and timing failures are otherwise difficult to reproduce, and
+D-2 assumes hardware is unavailable during ordinary development. Boundary logs
+isolate analyzer, estimator, cue, and renderer changes and let the same capture
+be compared across versions.
+
+*Accepts and expands:* PD-11.
+
+### D-20 — Output safety policy is independent of creative priority
+
+Emergency blackout, laser master enable, strobe limits, intensity ceilings,
+haze or atmosphere limits, manual override, freeze or hold, and safe
+loss-of-signal behavior are evaluated independently of creative cue priority.
+The laser gate covers both ILDA and DMX-attached laser paths. Haze is never
+mapped directly to beat- or onset-level features.
+
+*Why:* a high-priority cue is still a creative request and cannot be permitted
+to open a safety gate or bypass an operating limit. The current ILDA
+non-emission property does not protect DMX-attached lasers. Atmosphere operates
+at a much slower physical timescale than beats.
+
+This is a software-control boundary, not a legal or venue-compliance guarantee.
+It does not replace correct installation, physical interlocks or emergency
+stops where appropriate, trained supervision, or operator responsibility.
+
+*Accepts:* PD-4 and PD-9.
+
 ---
 
 ## Proposed decisions — show control
 
-**PROPOSED. None of these is accepted, and none binds current work.** They arise
-from [show_control_architecture.md](show_control_architecture.md) and its
-companion documents, and each would govern work that has not started. An agent
-may implement against a `PD-n` only after the owner accepts it and it is
-restated as a `D-n`.
+Entries in this section retain their stable `PD-n` identifiers. Some have now
+been accepted or superseded by the clarified live-renderer decisions D-13
+through D-20; their disposition is recorded in place. Entries still labeled
+PROPOSED bind nothing until accepted as a `D-n`.
 
 ### PD-1 — Semantic cues remain independent of fixture channel mappings
+
+**Accepted as D-16.**
 
 A cue names *what should happen* and *to which fixture group*. It never carries
 a universe, address, channel, or DMX value. Translation to channels happens only
@@ -159,13 +279,17 @@ merely discouraged, and generator review should reject it.
 
 ### PD-2 — Audio analysis remains independent of physical transports
 
-The audio-analysis layer imports no fixture, transport, or cue type. It produces
-an `AudioFeatureTimeline` and nothing else.
+**Accepted in substance by D-15 and D-16.**
 
-*Why:* analysis is slow, deterministic, and offline; transports are fast,
-stateful, and hardware-bound. Coupling them would make analysis untestable
-without hardware, which under [platform_support.md](platform_support.md) means
-untestable in the primary development environment.
+The audio-analysis layer imports no fixture, transport, or cue type. It
+produces normalized live feature frames or their offline timeline form and
+nothing device-specific.
+
+*Why:* live and offline analysis have different timing constraints, but both
+remain independent of stateful, hardware-bound transports. Coupling them would
+make analysis untestable without hardware, which under
+[platform_support.md](platform_support.md) means untestable in the primary
+development environment.
 
 ### PD-3 — Fixture profiles are versioned, validated, manual-sourced, and fail closed
 
@@ -183,6 +307,8 @@ profile on a strobe or a laser section is not merely a visual defect.
 
 ### PD-4 — Laser and haze output are governed by dedicated safety policies, and the laser gate covers the DMX path
 
+**Accepted as D-20.**
+
 [laser_and_haze_safety.md](laser_and_haze_safety.md) is normative for all laser
 and haze work. Critically, the laser gate applies to **DMX-attached laser
 fixtures** — the Keobin lasers and the GigBAR laser section — and not only to
@@ -195,8 +321,8 @@ existing sender with no gate of any kind. M11 addresses ILDA; nothing addresses
 DMX. This gap must be closed before M10 exposes laser capabilities in fixture
 profiles — and M10 sits *earlier* in the dependency order than M11.
 
-*Needed:* owner acknowledgement that this gap exists and agreement on where the
-gate is implemented.
+The exact gate implementation and verified fixture-safe values remain future
+work; the cross-output boundary is no longer open.
 
 ### PD-5 — Audio analysis results are cached, keyed by content hash, extractor version, and configuration hash
 
@@ -214,48 +340,48 @@ read back as "no beats detected" rather than as an error.
 
 ### PD-6 — Browser microphone reactivity is retained alongside offline analysis
 
-The existing spectral-flux onset path in `frontend/js/home.js` stays, as the
-live-performance fallback for unprepared material. The offline pipeline becomes
-the primary show mechanism. Both emit into the same cue vocabulary.
+**Superseded by D-13 and D-14.** The existing microphone path is still retained
+under D-9, but live system-audio capture is primary and offline analysis is
+optional.
 
-*Why:* the live path needs no file and no preparation, which is exactly right
-for a guest DJ or a live band, and it already works. It cannot be the foundation
-for synchronized show control — advancement is a function of onset *count*
-rather than musical time — but that is an argument against promoting it, not
-against keeping it. Consistent with D-9, which already keeps audio analysis in
-the browser for the live path.
+The existing spectral-flux onset path in `frontend/js/home.js` stays during
+migration. The future microphone source becomes a fallback to preferred system
+loopback, and both live sources share the normalized feature vocabulary with
+optional offline analysis.
+
+*Why:* live operation needs no file and no preparation, which is exactly right
+for an unpredictable party queue, a guest DJ, or a live band. The current
+onset-count mechanism is not promoted into the new analyzer, but removing it
+before its replacement works would violate D-1.
 
 ### PD-7 — One authoritative playback clock controls synchronization
 
-A single monotonic clock, owned by the synchronization layer, is the only
-component permitted to read time. Audio playback position is authoritative show
-time. All cues are scheduled against it.
+A single monotonic time base coordinates live feature, state, cue, and render
+timestamps. In live party mode, capture timestamps are authoritative. For
+prepared playback, audio position may be authoritative show time.
 
-**Open sub-question requiring the owner:** does playback happen in the browser
-(where audio already lives, and where position must then cross the network) or
-in the backend (where the scheduler lives, but which currently has no audio
-capability at all)? The analysis layer does not care. The scheduler cannot be
-designed without the answer, because browser playback puts network jitter inside
-the timing budget.
+**Remaining open sub-question:** where prepared-track playback happens. Browser
+playback puts network jitter inside the timing budget; backend playback adds a
+new audio-output responsibility. That question no longer blocks the live path.
 
-*Needed:* a decision before Phase 5, and ideally before Phase 3 finishes.
+*Needed:* a decision before prepared-track playback scheduling or Phase 5
+authoring work depends on it.
 
 ### PD-8 — WLED state control and realtime pixel streaming are separate capabilities
+
+**Accepted and refined by D-17.**
 
 They use separate transports, separate rates, and separate failure semantics.
 Pixel-rate updates never go through the JSON control path.
 
-**Open sub-question requiring the owner:** does Lights address WLED directly at
-all, or continue to reach it only through LedFx scene activation? Direct control
-gives frame-level determinism at the cost of reimplementing effects; LedFx gives
-audio-reactive effects at the cost of frame-level control and a process
-dependency. They are not exclusive — direct control for show-critical pixel
-cues and LedFx for named ambient scenes is a plausible answer — but ownership of
-each device must be unambiguous.
-
-*Needed:* a decision before Phase 2.
+Lights will address WLED directly while retaining LedFx as a compatibility
+adapter. The remaining implementation choices are the realtime protocol,
+supported firmware/hardware matrix, parity criteria, and explicit ownership
+transition for each device.
 
 ### PD-9 — Haze is a section-level control and is never mapped to beat- or onset-level features
+
+**Accepted in substance by D-20.**
 
 A style definition that maps `haze_output` to beats, onsets, or percussive
 energy fails validation.
@@ -268,19 +394,20 @@ sufficient — the generator must enforce it.
 
 ### PD-10 — Show generation from audio is a goal
 
-This whole programme assumes the operator wants *generated* shows. The
-alternative reading is that the real need is a better surface for authoring
-shows by hand, with audio alignment as an aid.
+Live semantic cue generation is accepted by D-13 through D-17. This remaining
+question is narrower: how much *offline prepared-show generation* the operator
+wants versus manual authoring aided by cached analysis.
 
-*Why this needs an explicit answer:* the audio-analysis layer is required either
-way, but the show-generation layer's size depends entirely on it. If manual
-authoring is the goal, Phase 3's generator shrinks to almost nothing and Phase
-5's timeline editor moves much earlier.
+*Why this still needs an explicit answer:* Phase 3A's live cue engine is needed
+either way, but Phase 3B's future-aware generator and Phase 5's editing surface
+change substantially with the answer.
 
 *Needed:* creator input. This is the single question with the largest effect on
 the shape of the work.
 
 ### PD-11 — Physical output must support mock and recording transports
+
+**Accepted and expanded by D-19.**
 
 Every output path — DMX, WLED state, WLED pixels, ILDA — has a null
 implementation and, where frames are meaningful, a recording implementation that
@@ -365,9 +492,11 @@ before M4.
 
 ### OQ-6 — Target DMX refresh rate
 
-DESIGN INTENT indicates roughly 20 ms (about 50 Hz). Current code has no
-application-level pacing at all (F4). The correct configurable default, and
-whether it should adapt to fixture count, is unverified against real hardware.
+Creator DESIGN INTENT indicates roughly 20 ms (about 50 Hz), while the approved
+live-renderer architecture sets an initial nonbinding engineering budget of
+approximately 30–44 FPS. Current code has no application-level pacing at all
+(F4). The correct configurable default, and whether it should adapt to fixture
+count, is unverified against real hardware.
 
 *Needed:* a native-Windows measurement against the real rig, during M5.
 
