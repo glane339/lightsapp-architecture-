@@ -1,3 +1,16 @@
+STATUS: STALE — SUPERSEDED.
+
+This file describes an earlier repository layout under the old project name
+"lightsapprevamp". It is inaccurate for the current tree: it omits the ilda,
+routes, and frontend subtrees, the fullscene/ildaframe/ildascene/storage/
+ai_mode_state models, paths.py, and main.py's current location, and it lists a
+"venv" directory that is not tracked.
+
+Superseded by the component map in docs/architecture.md. Retained for history
+only. Do not use it to navigate the repository; run `git ls-files` instead.
+
+--- historical content below ---
+
 lightsapprevamp
 -venv
 -backend
