@@ -12,6 +12,19 @@ and it cannot be tested at all until M2 exists.
 Milestones carry no dates, no effort estimates, and no completion percentages.
 Progress is tracked by acceptance criteria in [current_sprint.md](current_sprint.md).
 
+## Scope of this document
+
+These milestones **stabilize the application that exists**. They address the
+verified defects in [audit_findings.md](audit_findings.md).
+
+A separate, PROPOSED programme adds show-control capability that does not exist
+— audio-file analysis, semantic cues, fixture profiles as data, and synchronized
+output. Its phases are in
+[show_control_roadmap.md](show_control_roadmap.md), and every one of them
+depends on milestones from this document. The two are complementary, not
+alternatives. Note in particular that **M10 and that document's Phase 4 are the
+same work seen from two angles** and should be executed once, not twice.
+
 ## Milestone numbering
 
 An earlier draft of this plan used the M0–M10 range (11 numbered milestones).

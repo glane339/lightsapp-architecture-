@@ -4,8 +4,13 @@
 future work in this repository. Open questions require an owner decision and
 must not be resolved by an agent acting alone.
 
-Decisions are numbered `D-n`; open questions `OQ-n`. Neither is renumbered once
-assigned.
+Decisions are numbered `D-n`; open questions `OQ-n`; **proposed** decisions
+`PD-n`. None is renumbered once assigned.
+
+`D-n` decisions are accepted and binding. `PD-n` decisions are **not accepted**
+and bind nothing — they are recommendations awaiting an owner. On acceptance a
+`PD-n` is restated as the next free `D-n`, and the `PD-n` entry records where it
+went.
 
 ---
 
@@ -126,6 +131,179 @@ Narrowly scoped to M1. See [current_sprint.md](current_sprint.md).
 *Why:* nothing else can be tested until import is side-effect free, and a
 narrow first branch establishes the review pattern for the milestones that
 follow.
+
+---
+
+## Proposed decisions — show control
+
+**PROPOSED. None of these is accepted, and none binds current work.** They arise
+from [show_control_architecture.md](show_control_architecture.md) and its
+companion documents, and each would govern work that has not started. An agent
+may implement against a `PD-n` only after the owner accepts it and it is
+restated as a `D-n`.
+
+### PD-1 — Semantic cues remain independent of fixture channel mappings
+
+A cue names *what should happen* and *to which fixture group*. It never carries
+a universe, address, channel, or DMX value. Translation to channels happens only
+in the rendering layer, from validated fixture profile data.
+
+*Why:* it is the boundary that makes one audio analysis reusable across rigs and
+one rig reusable across tracks, and it is what allows the entire show-generation
+path to be tested with no fixture present. Violating it once collapses the
+distinction permanently, because the first channel number in a cue makes every
+later one look reasonable.
+
+*Enforcement:* the `Cue` type should make the violation impossible rather than
+merely discouraged, and generator review should reject it.
+
+### PD-2 — Audio analysis remains independent of physical transports
+
+The audio-analysis layer imports no fixture, transport, or cue type. It produces
+an `AudioFeatureTimeline` and nothing else.
+
+*Why:* analysis is slow, deterministic, and offline; transports are fast,
+stateful, and hardware-bound. Coupling them would make analysis untestable
+without hardware, which under [platform_support.md](platform_support.md) means
+untestable in the primary development environment.
+
+### PD-3 — Fixture profiles are versioned, validated, manual-sourced, and fail closed
+
+Every profile records its manufacturer, exact model, mode, the manual reference
+it was derived from, and a profile version. Every profile carries a `verified`
+flag that is false until checked against the physical fixture. **Unverified
+profiles may be simulated but may not receive physical output.** Unknown
+fixtures, unknown modes, and undeclared capabilities produce no output and a
+diagnostic — never a generic fallback or an approximation.
+
+*Why:* F19 — fixture knowledge is currently hardcoded across four files, and the
+only fixture-shaped data in the repository (`MODE_VALUES` in
+`frontend/js/device_presets.js`) is unverified against any manual. A wrong
+profile on a strobe or a laser section is not merely a visual defect.
+
+### PD-4 — Laser and haze output are governed by dedicated safety policies, and the laser gate covers the DMX path
+
+[laser_and_haze_safety.md](laser_and_haze_safety.md) is normative for all laser
+and haze work. Critically, the laser gate applies to **DMX-attached laser
+fixtures** — the Keobin lasers and the GigBAR laser section — and not only to
+the ILDA DAC path.
+
+*Why:* D-6 records that Lights cannot currently emit laser output, and that this
+is a safety property surrendered only once, deliberately. **That property covers
+the ILDA path only.** DMX laser channels are already reachable through the
+existing sender with no gate of any kind. M11 addresses ILDA; nothing addresses
+DMX. This gap must be closed before M10 exposes laser capabilities in fixture
+profiles — and M10 sits *earlier* in the dependency order than M11.
+
+*Needed:* owner acknowledgement that this gap exists and agreement on where the
+gate is implemented.
+
+### PD-5 — Audio analysis results are cached, keyed by content hash, extractor version, and configuration hash
+
+All three components, and manual corrections are stored separately from
+generated values so that re-analysis preserves them.
+
+*Why:* analysis is expensive enough that recomputation is not viable during
+authoring, and the cache key is what makes generated shows reproducible.
+Omitting any one key component produces stale artifacts that are very hard to
+diagnose. Storing corrections inside the generated arrays silently destroys the
+operator's work on the next re-analysis.
+
+*Depends on:* M3. F7 plus F8 means a non-atomically written artifact would be
+read back as "no beats detected" rather than as an error.
+
+### PD-6 — Browser microphone reactivity is retained alongside offline analysis
+
+The existing spectral-flux onset path in `frontend/js/home.js` stays, as the
+live-performance fallback for unprepared material. The offline pipeline becomes
+the primary show mechanism. Both emit into the same cue vocabulary.
+
+*Why:* the live path needs no file and no preparation, which is exactly right
+for a guest DJ or a live band, and it already works. It cannot be the foundation
+for synchronized show control — advancement is a function of onset *count*
+rather than musical time — but that is an argument against promoting it, not
+against keeping it. Consistent with D-9, which already keeps audio analysis in
+the browser for the live path.
+
+### PD-7 — One authoritative playback clock controls synchronization
+
+A single monotonic clock, owned by the synchronization layer, is the only
+component permitted to read time. Audio playback position is authoritative show
+time. All cues are scheduled against it.
+
+**Open sub-question requiring the owner:** does playback happen in the browser
+(where audio already lives, and where position must then cross the network) or
+in the backend (where the scheduler lives, but which currently has no audio
+capability at all)? The analysis layer does not care. The scheduler cannot be
+designed without the answer, because browser playback puts network jitter inside
+the timing budget.
+
+*Needed:* a decision before Phase 5, and ideally before Phase 3 finishes.
+
+### PD-8 — WLED state control and realtime pixel streaming are separate capabilities
+
+They use separate transports, separate rates, and separate failure semantics.
+Pixel-rate updates never go through the JSON control path.
+
+**Open sub-question requiring the owner:** does Lights address WLED directly at
+all, or continue to reach it only through LedFx scene activation? Direct control
+gives frame-level determinism at the cost of reimplementing effects; LedFx gives
+audio-reactive effects at the cost of frame-level control and a process
+dependency. They are not exclusive — direct control for show-critical pixel
+cues and LedFx for named ambient scenes is a plausible answer — but ownership of
+each device must be unambiguous.
+
+*Needed:* a decision before Phase 2.
+
+### PD-9 — Haze is a section-level control and is never mapped to beat- or onset-level features
+
+A style definition that maps `haze_output` to beats, onsets, or percussive
+energy fails validation.
+
+*Why:* haze does not respond on beat timescales, so the mapping produces no
+visual effect; rapid cycling stresses the pump and heater; it defeats
+duty-cycle and minimum-off accounting; and unpredictable bursts are the pattern
+most likely to trip venue smoke detection. Documenting the prohibition is not
+sufficient — the generator must enforce it.
+
+### PD-10 — Show generation from audio is a goal
+
+This whole programme assumes the operator wants *generated* shows. The
+alternative reading is that the real need is a better surface for authoring
+shows by hand, with audio alignment as an aid.
+
+*Why this needs an explicit answer:* the audio-analysis layer is required either
+way, but the show-generation layer's size depends entirely on it. If manual
+authoring is the goal, Phase 3's generator shrinks to almost nothing and Phase
+5's timeline editor moves much earlier.
+
+*Needed:* creator input. This is the single question with the largest effect on
+the shape of the work.
+
+### PD-11 — Physical output must support mock and recording transports
+
+Every output path — DMX, WLED state, WLED pixels, ILDA — has a null
+implementation and, where frames are meaningful, a recording implementation that
+captures timestamped output instead of transmitting it.
+
+*Why:* D-2 assumes hardware is unavailable and D-8 forbids hardware claims from
+WSL2. Without recording transports there is no way to validate output at all in
+the primary development environment. `backend/ilda/sink.py` already proves the
+pattern works in this codebase; DMX and LedFx simply lack it.
+
+### PD-12 — Transport libraries remain behind project-owned internal interfaces
+
+No third-party transport library's types cross its integration boundary. The
+internal interface is defined first; the library is evaluated against it.
+
+*Why:* the existing LedFx integration is the counter-example. `LEDFXClient` is
+constructed inline at its call site in `backend/routes/post.py`, which is a
+direct cause of why F16 (inconsistent timeouts) and F17 (host coupling) are
+awkward to fix and why the client cannot be substituted in a test. Repeating
+that with a WLED client, an Art-Net library, or an audio library would multiply
+the problem. Consistent with the existing constraint in
+[architecture.md](architecture.md) Part 3 that adapters must not be forced into
+one artificial shared interface — share lifecycle only.
 
 ---
 
