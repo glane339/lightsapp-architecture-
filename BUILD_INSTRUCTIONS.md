@@ -1,5 +1,44 @@
 # Building LightsApp as Standalone Executable and Installer
 
+> **STATUS: PARTIALLY STALE — build documentation, retained deliberately.**
+>
+> This file predates the architecture fork and is the repository's most
+> detailed record of the Windows packaging process, so it is kept.
+>
+> **Everything below this banner is historical and unverified.** It has not
+> been exercised against the current tree, and no claim in it carries an
+> evidence label.
+>
+> **The corrections in this banner are separate, and are CODE-INSPECTED ONLY —
+> each was checked against the current tree:**
+>
+> - **"Python 3.10+" is outdated.** This fork requires **3.12.1**.
+> - **`installer.iss` is not tracked in this repository.** The Inno Setup
+>   section cannot be followed as written.
+> - **The build assumes the repository root is the working directory.**
+>   `build.bat` does not anchor itself with `cd /d "%~dp0"`, and
+>   `build_exe.py:14-18` passes the bare spec name `'lightsapp.spec'` to
+>   PyInstaller. Run both from the repository root.
+> - **Step 3 is not a build step.** "Verify it starts correctly" and "check that
+>   DMX and LedFx functionality works" launch the real application: the
+>   executable runs `backend/main.py`, which constructs and starts an sACN
+>   sender at import and polls LedFx from its status loop (F1, F3 in
+>   [docs/audit_findings.md](docs/audit_findings.md)). Treat launching the
+>   executable as a hardware- and network-affecting action, requiring native
+>   Windows and the real rig, until a verified no-hardware composition exists
+>   (M1/M2). It can never be performed from WSL2 — see
+>   [docs/platform_support.md](docs/platform_support.md).
+> - **The `0.0.0.0` guidance exposes an unauthenticated API.** No route has
+>   authentication and CORS is wildcarded (F12, F13). It also produces a
+>   nonportable LedFx destination: `server_host` is reused as the LedFx host,
+>   conflating the FastAPI *bind* address with an outbound *destination*
+>   address, which makes remote or split-host LedFx configuration impossible to
+>   express (F17). Whether `http://0.0.0.0:8888` also fails locally is
+>   client- and OS-dependent and is not asserted here.
+>
+> For current architecture and policy, start at
+> [docs/project_overview.md](docs/project_overview.md).
+
 This guide explains how to create a portable `.exe` file and installer for LightsApp that can run from a flash drive.
 
 ## Prerequisites

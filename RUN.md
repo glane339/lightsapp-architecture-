@@ -1,5 +1,34 @@
 # Running the app (any device)
 
+> **STATUS: PARTIALLY STALE — operator documentation, retained deliberately.**
+>
+> This file predates the architecture fork and describes running the
+> application against real hardware. It is kept because the Windows deployment
+> knowledge here exists nowhere else in the repository, but three things in it
+> are wrong or unsafe for architecture work:
+>
+> 1. **"Python 3.10+" is outdated.** This fork requires **3.12.1**. See
+>    [README.md](README.md).
+> 2. **`python backend/main.py` is not a validation command.** Importing or
+>    running that module initializes data, starts sACN output, and launches
+>    Uvicorn — findings F1–F3 in [docs/audit_findings.md](docs/audit_findings.md).
+>    Never use it to check that a change works. Use the hardware-safe commands
+>    in [docs/platform_support.md](docs/platform_support.md).
+> 3. **Setting `server_host` to `0.0.0.0` exposes an unauthenticated API.**
+>    There is no authentication on any route and CORS is wildcarded (F12, F13).
+>    Do this only on a trusted network, knowingly.
+>
+> Also note that `server_host` currently doubles as the LedFx destination host
+> (F17). Changing it for LAN access conflates the FastAPI *bind* address with an
+> outbound *destination* address and produces a nonportable LedFx target — with
+> `0.0.0.0`, the client is pointed at `http://0.0.0.0:8888/api`. It also makes
+> remote or split-host LedFx configuration impossible to express at all.
+> Whether that local target also fails outright is client- and OS-dependent and
+> is not asserted here.
+>
+> For current architecture and policy, start at
+> [docs/project_overview.md](docs/project_overview.md).
+
 `run.bat` works **outside Cursor** and from any folder: it uses `%~dp0` so it always switches to the project directory first. You can double‑click it in Explorer or run it from a terminal.
 
 ## On another Windows PC

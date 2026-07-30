@@ -9,25 +9,64 @@ Work in this repository only. Do not inspect or modify sibling repositories.
 See `AGENTS.md` and `CLAUDE.md` for the complete contributor and hardware-safety
 boundaries.
 
+## Documentation
+
+The canonical documentation lives in [docs/](docs/). If you are new to this
+repository, read the first four in order.
+
+| Document | What it answers |
+| --- | --- |
+| [docs/project_overview.md](docs/project_overview.md) | What Lights is, what it does, the state of every feature, and the evidence labels used throughout |
+| [docs/architecture.md](docs/architecture.md) | How it works today, the creator's design intent, and the target architecture — kept strictly separate |
+| [docs/audit_findings.md](docs/audit_findings.md) | Verified defects F1–F25, prioritized, with the statements that must not be repeated about them |
+| [docs/current_sprint.md](docs/current_sprint.md) | The milestone in progress and the next branch's exact scope |
+| [docs/roadmap.md](docs/roadmap.md) | Dependency-ordered milestones M0–M12 |
+| [docs/platform_support.md](docs/platform_support.md) | WSL2 development versus native-Windows hardware validation |
+| [docs/decisions.md](docs/decisions.md) | Accepted decisions (D-1…) and open questions needing an owner (OQ-1…) |
+| [docs/session_handoff.md](docs/session_handoff.md) | Operational state for the next session |
+
+Two conventions carry across all of these. Every substantive claim is labeled
+with how much confidence it has earned — VERIFIED CURRENT BEHAVIOR, DESIGN
+INTENT, TARGET ARCHITECTURE, and the rest are defined in
+[docs/project_overview.md](docs/project_overview.md). And nothing in this
+repository is currently HARDWARE VERIFIED.
+
+Superseded documents are marked with a status banner rather than deleted:
+`RUN.md`, `QUICK_START.md`, `BUILD_INSTRUCTIONS.md`, and `file_structure.txt`.
+
 ## Environment
 
-LightsApp requires Python **3.12.1**. From WSL2:
+LightsApp requires Python **3.12.1**. WSL2 is the primary development
+environment; native Windows is the deployment and hardware-validation
+environment (see [docs/platform_support.md](docs/platform_support.md)). All
+commands below are run from the repository root and use repository-relative
+paths.
+
+WSL2 / Linux:
 
 ```bash
-cd ~/projects/lightsapp-architecture-
 uv python install 3.12.1
 uv venv --python 3.12.1 .venv
 source .venv/bin/activate
 uv pip install --python .venv/bin/python -r requirements.txt
 ```
 
+Native Windows (PowerShell):
+
+```powershell
+uv python install 3.12.1
+uv venv --python 3.12.1 .venv
+.\.venv\Scripts\Activate.ps1
+uv pip install --python .\.venv\Scripts\python.exe -r requirements.txt
+```
+
 `uv venv` environments may initially lack `pip`. The `uv pip install
 --python ...` command above installs requirements directly into the selected
 environment and does not require `python -m pip`.
 
-The expected interpreter is:
-
-`/home/griffin/projects/lightsapp-architecture-/.venv/bin/python`
+The expected interpreter is `.venv/bin/python` on WSL2/Linux and
+`.venv\Scripts\python.exe` on native Windows, in both cases relative to the
+repository root.
 
 ## Cursor
 
@@ -38,29 +77,30 @@ cd ~/projects/lightsapp-architecture-
 cursor .
 ```
 
-In Cursor, select the Python interpreter:
-
-`/home/griffin/projects/lightsapp-architecture-/.venv/bin/python`
+In Cursor, select the repository's own interpreter: `.venv/bin/python` under the
+repository root (`.venv\Scripts\python.exe` on native Windows).
 
 ## Safe CLI startup
 
 Set an isolated data directory before starting an agent. These commands do not
-launch LightsApp:
+launch LightsApp. Run them from the repository root.
+
+WSL2 / Linux:
 
 ```bash
-cd ~/projects/lightsapp-architecture-
 source .venv/bin/activate
 export LIGHTSAPP_DATA_DIR="$PWD/.local-data"
 ./scripts/context.sh
-codex
+codex   # or: claude
 ```
 
-```bash
-cd ~/projects/lightsapp-architecture-
-source .venv/bin/activate
-export LIGHTSAPP_DATA_DIR="$PWD/.local-data"
-./scripts/context.sh
-claude
+Native Windows (PowerShell) — `scripts/context.sh` is a Bash script and has no
+PowerShell equivalent yet, so skip it there:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+$env:LIGHTSAPP_DATA_DIR = Join-Path $PWD ".local-data"
+codex   # or: claude
 ```
 
 `.env.example` contains a placeholder for tools that load `.env` files.
@@ -77,13 +117,17 @@ does not import `backend/main.py`:
 python -c "import fastapi, uvicorn, pydantic, requests, sacn; print('Core imports passed')"
 ```
 
-The existing ILDA reader smoke check is also hardware-safe. It must run with
-`backend` on the Python import path:
+The existing ILDA reader smoke check is also hardware-safe. Run it as a package
+module from the repository root — importing `backend` puts `backend/` on
+`sys.path` (`backend/__init__.py:1-7`), which is what makes its top-level
+`from ilda.reader import ...` resolve:
 
 ```bash
-cd backend
-../.venv/bin/python -m ilda.test_reader
-cd ..
+.venv/bin/python -m backend.ilda.test_reader
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m backend.ilda.test_reader
 ```
 
 Do not run or import `backend/main.py` as ordinary validation. It currently
@@ -123,6 +167,15 @@ error handling, a `ShowCatalog` or equivalent authoritative catalog, a runtime
 manager, clear service boundaries, hardware adapters, preflight validation,
 atomic persistence, and broader hardware-safe testing and developer tooling.
 These are direction statements, not claims that all components exist today.
+**The target architecture as a complete composition is not implemented** — no
+composition root, catalog, runtime manager, preflight service, or atomic
+persistence layer exists. A few precursor seams do exist and are worth knowing
+about: Pydantic validation on read, the ILDA `PointSink`/`NullSink` output
+seam, the `LIGHTSAPP_DATA_DIR` data-directory seam, and the existing developer
+tooling under `scripts/`. See [docs/architecture.md](docs/architecture.md)
+Part 3 for what exists versus what is proposed, and
+[docs/roadmap.md](docs/roadmap.md) for the order in which the rest is being
+approached.
 
 ## Optional user-local aliases
 
